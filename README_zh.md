@@ -126,7 +126,9 @@ python run_flow.py
 
 **注意**: 在提交 pull request 之前，请使用 pre-commit 工具检查您的更改。运行 `pre-commit run --all-files` 来执行检查。
 
-## 交流群
+## 交流
+- [Discord](https://discord.gg/uXjhv3Jp9s)
+- [QQ群](http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=1XmdWxsfaDbgwq6oowemjjibzwml-bPO&authKey=1YifslbduQQmNTPH3XmXEPlH1zNM5wKd2djP3TIIXBr5UWPem5ULaNzS7mqBcOSe&noverify=0&group_code=725104480)
 
 ## 致谢
 
