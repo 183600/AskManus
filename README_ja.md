@@ -1,19 +1,18 @@
-[English](README.md) | 中国語 | [한국어](README_ko.md) | [日本語](README_ja.md)
+[English](README.md) | 中文 | [한국어](README_ko.md) | [日本語](README_ja.md)
 
-[![GitHub stars](https://img.shields.io/github/stars/mannaandpoem/OpenManus?style=social)](https://github.com/mannaandpoem/OpenManus/stargazers)
 &ensp;
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) &ensp;
-[![Discord Follow](https://dcbadge.vercel.app/api/server/DYn29wFk9z?style=flat)](https://discord.gg/DYn29wFk9z)
+[![Discord Follow](https://dcbadge.vercel.app/api/server/uXjhv3Jp9s?style=flat)](https://discord.gg/uXjhv3Jp9s)
 
 # 👋 AskManus
 
-OpenManusに基づいて提供しています：
-- インストールスクリプト
-- ユーザーの発言後に必要に応じてコマンドラインで選択肢を表示し、各選択肢に必要に応じて説明を付加します
+OpenManusを基にしたAIエージェントで、以下の機能を提供します：
+• インストールスクリプト
+• ユーザーとの対話時に、ユーザーが発言した後、必要に応じてコマンドラインに選択肢を表示し、各選択肢には必要に応じて説明が付きます
 
 ## インストールガイド
 
-2つのインストール方法を提供します。方法2（uv）が推奨されます（より高速なインストールと依存関係管理が可能です）。
+2つのインストール方法を提供しています。方法2（uv）を推奨します。より高速なインストール速度と優れた依存関係管理を提供するためです。
 
 ### 方法1：condaを使用
 
@@ -39,7 +38,7 @@ pip install -r requirements.txt
 
 ### 方法2：uvを使用（推奨）
 
-1. uv（高速Pythonパッケージマネージャー）をインストール：
+1. uv（高速なPythonパッケージマネージャー）をインストール：
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -52,87 +51,85 @@ git clone https://github.com/mannaandpoem/OpenManus.git
 cd OpenManus
 ```
 
-3.仮想環境を作成して有効化：
+3. 仮想環境を作成して有効化：
 
 ```bash
 uv venv --python 3.12
-source .venv/bin/activate  # Unix/macOSの場合
-# Windowsの場合：
+source .venv/bin/activate  # Unix/macOSシステム
+# Windowsシステムでは：
 # .venv\Scripts\activate
 ```
 
-4.依存関係をインストール：
+4. 依存関係をインストール：
 
 ```bash
 uv pip install -r requirements.txt
 ```
 
 ### ブラウザ自動化ツール（オプション）
-
 ```bash
 playwright install
 ```
 
-## 設定ガイド
+## 設定説明
 
-AskManusは使用するLLM APIの設定が必要です。以下の手順で設定してください：
+AskManusは使用するLLM APIの設定が必要です。以下の手順で設定できます：
 
-1. `config`ディレクトリに`config.toml`ファイルを作成（例からコピー）：
+1. `config`ディレクトリに`config.toml`ファイルを作成（サンプルからコピー可）：
 
 ```bash
 cp config/config.example.toml config/config.toml
 ```
 
-2. `config/config.toml`を編集し、APIキーとカスタム設定を追加：
+2. `config/config.toml`を編集してAPIキーとカスタム設定を追加：
 
 ```toml
-# 全体のLLM設定
+# グローバルLLM設定
 [llm]
 model = "gpt-4o"
 base_url = "https://api.openai.com/v1"
-api_key = "sk-..."  # 実際のAPIキーに置換
+api_key = "sk-..."  # 実際のAPIキーに置き換えてください
 max_tokens = 4096
 temperature = 0.0
 
-# 特定LLMモデルの設定（オプション）
+# オプションの特定LLMモデル設定
 [llm.vision]
 model = "gpt-4o"
 base_url = "https://api.openai.com/v1"
-api_key = "sk-..."  # 実際のAPIキーに置換
+api_key = "sk-..."  # 実際のAPIキーに置き換えてください
 ```
 
 ## クイックスタート
 
-一行コマンドでAskManusを実行：
+AskManusを実行：
 
 ```bash
 python main.py
 ```
 
-その後、ターミナルでアイデアを入力できます！
+その後、ターミナルからアイデアを入力してください！
 
-MCPツールバージョンを使用する場合は：
+MCPツールバージョンを使用する場合は、以下を実行：
 ```bash
 python run_mcp.py
 ```
 
-不安定なマルチエージェントバージョンを体験する場合は：
+不安定なマルチエージェントバージョンを体験する場合は、以下を実行：
+
 ```bash
 python run_flow.py
 ```
 
-## コントリビューションガイド
+## 貢献ガイド
 
-友好的な提案や価値あるコントリビューションを歓迎します！Issueの作成やPull Requestの送信が可能です。
+友好的な提案や価値ある貢献を歓迎します！直接issueを作成するかpull requestを提出してください。
 
-**注意**: Pull Requestを送信する前に、`pre-commit run --all-files`で変更内容をチェックしてください。
+**注意**: pull requestを提出する前に、pre-commitツールで変更をチェックしてください。`pre-commit run --all-files`を実行してチェックを行います。
 
-## コミュニティ
+## 交流
+• [Discord](https://discord.gg/uXjhv3Jp9s)
+• [QQグループ](http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=1XmdWxsfaDbgwq6oowemjjibzwml-bPO&authKey=1YifslbduQQmNTPH3XmXEPlH1zNM5wKd2djP3TIIXBr5UWPem5ULaNzS7mqBcOSe&noverify=0&group_code=725104480)
 
-## スター数推移
+## 謝辞
 
-[![Star History Chart](https://api.star-history.com/svg?repos=mannaandpoem/OpenManus&type=Date)](https://star-history.com/#mannaandpoem/OpenManus&Date)
-
-## クレジット
-
-本プロジェクトはOpenManusに基づいています。特別に[OpenManus](https://github.com/anthropics/anthropic-quickstarts/tree/main/computer-use-demo)が提供した基盤技術に感謝します！
+このプロジェクトはOpenManusを基にしており、[OpenManus](https://github.com/anthropics/anthropic-quickstarts/tree/main/computer-use-demo)に特別な感謝を申し上げます。

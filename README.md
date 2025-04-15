@@ -1,35 +1,37 @@
-[English](README.md) | 中文 | [한국어](README_ko.md) | [日本語](README_ja.md)
+[English](README.md) | Chinese | [한국어](README_ko.md) | [日本語](README_ja.md)
 
-[![GitHub stars](https://img.shields.io/github/stars/mannaandpoem/OpenManus?style=social)](https://github.com/mannaandpoem/OpenManus/stargazers)
 &ensp;
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) &ensp;
-[![Discord Follow](https://dcbadge.vercel.app/api/server/DYn29wFk9z?style=flat)](https://discord.gg/DYn29wFk9z)
+[![Discord Follow](https://dcbadge.vercel.app/api/server/uXjhv3Jp9s?style=flat)](https://discord.gg/uXjhv3Jp9s)
 
 # 👋 AskManus
 
-Based on OpenManus, this project provides:
+An AI Agent based on OpenManus, providing:
 - Installation scripts
-- During user interactions, after a user inputs a message, the system may display command-line options for selection if necessary. Each option may include explanations if required .
+- During user conversations, after the user speaks, if necessary, several options will pop up in the command line for the user to choose from, and each option will include an explanation if needed.
 
 ## Installation Guide
 
-Two installation methods are provided. **Method 2 (uv) is recommended** for faster installation and better dependency management.
+We offer two installation methods. Method 2 (uv) is recommended as it provides faster installation speed and better dependency management.
 
-### Method 1: Using Conda
+### Method 1: Using conda
 
 1. Create a new conda environment:
+
 ```bash
 conda create -n open_manus python=3.12
 conda activate open_manus
 ```
 
 2. Clone the repository:
+
 ```bash
 git clone https://github.com/mannaandpoem/OpenManus.git
 cd OpenManus
 ```
 
 3. Install dependencies:
+
 ```bash
 pip install -r requirements.txt
 ```
@@ -37,91 +39,97 @@ pip install -r requirements.txt
 ### Method 2: Using uv (Recommended)
 
 1. Install uv (a fast Python package manager):
+
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 2. Clone the repository:
+
 ```bash
 git clone https://github.com/mannaandpoem/OpenManus.git
 cd OpenManus
 ```
 
 3. Create and activate a virtual environment:
+
 ```bash
 uv venv --python 3.12
-source .venv/bin/activate  # For Unix/macOS
-# For Windows:
+source .venv/bin/activate  # Unix/macOS systems
+# For Windows systems, use:
 # .venv\Scripts\activate
 ```
 
 4. Install dependencies:
+
 ```bash
 uv pip install -r requirements.txt
 ```
 
-### Browser Automation Tools (Optional)
+### Browser Automation Tool (Optional)
 ```bash
 playwright install
 ```
 
-## Configuration
+## Configuration Instructions
 
-To configure AskManus with an LLM API, follow these steps:
+AskManus requires configuration of the LLM API. Follow these steps to set it up:
 
-1. Create a `config.toml` file in the `config` directory (copy from the example):
+1. Create a `config.toml` file in the `config` directory (you can copy from the example):
+
 ```bash
 cp config/config.example.toml config/config.toml
 ```
 
-2. Edit `config/config.toml` to add API keys and custom settings:
+2. Edit `config/config.toml` to add API keys and customize settings:
+
 ```toml
 # Global LLM configuration
 [llm]
 model = "gpt-4o"
 base_url = "https://api.openai.com/v1"
-api_key = "sk-..."  # Replace with your API key
+api_key = "sk-..."  # Replace with a real API key
 max_tokens = 4096
 temperature = 0.0
 
-# Optional model-specific configurations
+# Optional specific LLM model configuration
 [llm.vision]
 model = "gpt-4o"
 base_url = "https://api.openai.com/v1"
-api_key = "sk-..."  # Replace with your API key
+api_key = "sk-..."  # Replace with a real API key
 ```
 
 ## Quick Start
 
-Run AskManus with a single command:
+Run AskManus with one command:
+
 ```bash
 python main.py
 ```
 
-Then input your queries via the terminal!
+Then input your ideas through the terminal!
 
-For the MCP tool version:
+To use the MCP tool version, run:
 ```bash
 python run_mcp.py
 ```
 
-For the experimental multi-agent version:
+To experience the unstable multi-agent version, run:
+
 ```bash
 python run_flow.py
 ```
 
 ## Contribution Guidelines
 
-Contributions of all kinds are welcome! Feel free to open an issue or submit a pull request.
+We welcome any friendly suggestions and valuable contributions! You can directly create an issue or submit a pull request.
 
-**Note**: Before submitting a pull request, use `pre-commit run --all-files` to validate your changes .
+**Note**: Before submitting a pull request, please use the pre-commit tool to check your changes. Run `pre-commit run --all-files` to perform the checks.
 
-## Community
-
-## Star Count
-
-[![Star History Chart](https://api.star-history.com/svg?repos=mannaandpoem/OpenManus&type=Date)](https://star-history.com/#mannaandpoem/OpenManus&Date)
+## Communication
+- [Discord](https://discord.gg/uXjhv3Jp9s)
+- [QQ Group](http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=1XmdWxsfaDbgwq6oowemjjibzwml-bPO&authKey=1YifslbduQQmNTPH3XmXEPlH1zNM5wKd2djP3TIIXBr5UWPem5ULaNzS7mqBcOSe&noverify=0&group_code=725104480)
 
 ## Acknowledgments
 
-This project is built upon OpenManus. Special thanks to [OpenManus](https://github.com/anthropics/anthropic-quickstarts/tree/main/computer-use-demo) for foundational support!
+This project is based on OpenManus. Special thanks to [OpenManus](https://github.com/anthropics/anthropic-quickstarts/tree/main/computer-use-demo) for providing the foundational support for this project!
