@@ -1,9 +1,8 @@
 [English](README.md) | 中文 | [한국어](README_ko.md) | [日本語](README_ja.md)
 
-[![GitHub stars](https://img.shields.io/github/stars/mannaandpoem/OpenManus?style=social)](https://github.com/mannaandpoem/OpenManus/stargazers)
 &ensp;
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) &ensp;
-[![Discord Follow](https://dcbadge.vercel.app/api/server/DYn29wFk9z?style=flat)](https://discord.gg/DYn29wFk9z)
+[![Discord Follow](https://dcbadge.vercel.app/api/server/uXjhv3Jp9s?style=flat)](https://discord.gg/uXjhv3Jp9s)
 
 # 👋 AskManus
 
@@ -128,10 +127,6 @@ python run_flow.py
 **注意**: 在提交 pull request 之前，请使用 pre-commit 工具检查您的更改。运行 `pre-commit run --all-files` 来执行检查。
 
 ## 交流群
-
-## Star 数量
-
-[![Star History Chart](https://api.star-history.com/svg?repos=mannaandpoem/OpenManus&type=Date)](https://star-history.com/#mannaandpoem/OpenManus&Date)
 
 ## 致谢
 
