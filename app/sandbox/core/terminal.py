@@ -6,7 +6,6 @@ allowing interactive command execution with timeout control.
 """
 
 import asyncio
-import re
 import socket
 from typing import Dict, Optional, Tuple, Union
 
@@ -176,15 +175,34 @@ class DockerSession:
                 buffer = bytearray()
                 result_lines = []
                 command_sent = False
-                exit_echo_seen = False
                 exit_code_seen = False
+                pending_marker: Optional[bytes] = None
+                pending_exit: Optional[bytes] = None
                 idle_timeout = 0.1
 
-                marker_pending: Optional[bytes] = None
+                def commit_marker() -> None:
+                    nonlocal pending_marker, pending_exit, exit_code_seen
+                    if pending_marker is not None:
+                        prefix = pending_marker[
+                            : pending_marker.rfind(b"$ echo $?")
+                        ].rstrip(b"\r")
+                        if prefix.strip():
+                            result_lines.append(prefix)
+                    pending_marker = None
+                    pending_exit = None
+                    exit_code_seen = True
+
+                def commit_output() -> None:
+                    nonlocal pending_marker, pending_exit
+                    if pending_marker is not None:
+                        result_lines.append(pending_marker)
+                    if pending_exit is not None:
+                        result_lines.append(pending_exit)
+                    pending_marker = None
+                    pending_exit = None
 
                 def process(chunk: bytes) -> None:
-                    nonlocal buffer, command_sent, exit_echo_seen, exit_code_seen
-                    nonlocal marker_pending
+                    nonlocal command_sent, pending_marker, pending_exit
                     buffer.extend(chunk)
 
                     start = 0
@@ -200,25 +218,20 @@ class DockerSession:
                             command_sent = True
                             continue
 
-                        if marker_pending is not None:
-                            if stripped.isdigit() and not exit_code_seen:
-                                prefix = marker_pending[
-                                    : marker_pending.rfind(b"$ echo $?")
-                                ].rstrip(b"\r")
-                                if prefix.strip():
-                                    result_lines.append(prefix)
-                                exit_echo_seen = True
-                                exit_code_seen = True
-                                continue
-                            result_lines.append(marker_pending)
-                            marker_pending = None
-
-                        if not exit_echo_seen and stripped.endswith(b"$ echo $?"):
-                            marker_pending = line
+                        if exit_code_seen:
                             continue
 
-                        if exit_echo_seen and stripped.isdigit():
-                            exit_code_seen = True
+                        if pending_exit is not None:
+                            commit_output()
+                        elif pending_marker is not None:
+                            if stripped.isdigit():
+                                pending_exit = line
+                                continue
+                            result_lines.append(pending_marker)
+                            pending_marker = None
+
+                        if stripped.endswith(b"$ echo $?"):
+                            pending_marker = line
                             continue
 
                         if stripped:
@@ -252,10 +265,10 @@ class DockerSession:
                     if done:
                         break
 
-                output = b"\n".join(result_lines).decode("utf-8")
-                output = re.sub(r"\n\$ echo \$\$?.*$", "", output)
+                if pending_exit is not None:
+                    commit_marker()
 
-                return output
+                return b"\n".join(result_lines).decode("utf-8")
 
             if timeout:
                 result = await asyncio.wait_for(read_output(), timeout)
