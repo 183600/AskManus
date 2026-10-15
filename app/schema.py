@@ -163,16 +163,28 @@ class Memory(BaseModel):
     def add_message(self, message: Message) -> None:
         """Add a message to memory"""
         self.messages.append(message)
-        # Optional: Implement message limit
-        if len(self.messages) > self.max_messages:
-            del self.messages[: len(self.messages) - self.max_messages]
+        self._trim_to_limit()
 
     def add_messages(self, messages: List[Message]) -> None:
         """Add multiple messages to memory"""
         self.messages.extend(messages)
-        # Optional: Implement message limit
-        if len(self.messages) > self.max_messages:
-            del self.messages[: len(self.messages) - self.max_messages]
+        self._trim_to_limit()
+
+    def _trim_to_limit(self) -> None:
+        """Drop the oldest messages once ``max_messages`` is exceeded.
+
+        The cut point is moved forward past any tool results so the retained
+        window never starts with a tool message whose originating assistant
+        tool call was dropped; providers reject such histories.
+        """
+        overflow = len(self.messages) - self.max_messages
+        if overflow <= 0:
+            return
+
+        cut = overflow
+        while cut < len(self.messages) and self.messages[cut].role == "tool":
+            cut += 1
+        del self.messages[:cut]
 
     def clear(self) -> None:
         """Clear all messages"""
