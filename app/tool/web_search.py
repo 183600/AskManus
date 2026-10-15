@@ -108,7 +108,7 @@ _SESSION_LOCAL = threading.local()
 
 
 def _get_session() -> requests.Session:
-    """Return a per-thread requests session with connection pooling."""
+    """Return a per-thread requests session."""
     session = getattr(_SESSION_LOCAL, "session", None)
     if session is None:
         session = requests.Session()
@@ -139,7 +139,6 @@ class WebContentFetcher:
         }
 
         def _fetch() -> requests.Response:
-            # Reuse pooled connections but don't leak cookies between requests
             session = _get_session()
             session.cookies.clear()
             return session.get(url, headers=headers, timeout=timeout)

@@ -83,8 +83,6 @@ class _BashSession:
                 delay = 0.01
                 while True:
                     await asyncio.sleep(delay)
-                    # Poll quickly at first, then back off up to the configured
-                    # delay to avoid adding latency to fast commands.
                     delay = min(delay * 2, self._output_delay)
                     # if we read directly from stdout/stderr, it will wait forever for
                     # EOF. use the StreamReader buffer directly instead.

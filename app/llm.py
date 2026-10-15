@@ -61,8 +61,6 @@ class TokenCounter:
     HIGH_DETAIL_TARGET_SHORT_SIDE = 768
     TILE_SIZE = 512
 
-    # Bounded cache for token counts of repeated strings (system prompts,
-    # tool descriptions, unchanged conversation turns, ...).
     CACHE_MAX_ENTRIES = 4096
     CACHE_MAX_TOTAL_CHARS = 4_000_000
 

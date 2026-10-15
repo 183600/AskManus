@@ -275,8 +275,6 @@ class DockerSandbox:
                 self.container.get_archive, resolved_src
             )
 
-            # Buffer the stream in memory and extract from it directly,
-            # avoiding a temporary file round-trip on disk.
             buffer = io.BytesIO()
             for chunk in stream:
                 buffer.write(chunk)
@@ -331,7 +329,6 @@ class DockerSandbox:
             if container_dir:
                 await self.run_command(f"mkdir -p {container_dir}")
 
-            # Build the tar archive in memory to avoid a temporary file on disk
             tar_buffer = io.BytesIO()
             with tarfile.open(fileobj=tar_buffer, mode="w") as tar:
                 # Handle directory source path

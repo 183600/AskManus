@@ -180,23 +180,13 @@ class DockerSession:
                             command_sent = True
                             continue
 
-                        # The tty prints the prompt before echoing the
-                        # `echo $?` line; only a prompt after that echoed
-                        # line marks the true end of the command.
                         if stripped in (b"echo $?", b"$ echo $?"):
                             exit_echo_seen = True
                             continue
 
-                        # If the command output has no trailing newline, the
-                        # prompt and the echoed `echo $?` are glued to the
-                        # last output line; keep the line, but treat it as
-                        # the marker as well.
                         if not exit_echo_seen and stripped.endswith(b"$ echo $?"):
                             exit_echo_seen = True
 
-                        # Bare numbers are command output unless they arrive
-                        # right after the `echo $?` marker, whose output is
-                        # the exit code.
                         if exit_echo_seen and stripped.isdigit():
                             exit_code_seen = True
                             continue
@@ -212,12 +202,6 @@ class DockerSession:
 
                     done = False
                     while buffer.endswith(b"$ "):
-                        # The command is only finished once its exit code
-                        # has been observed. A bare prompt may be the
-                        # intermediate prompt printed before the echoed
-                        # `echo $?` line, so wait briefly for more output;
-                        # an idle stream ends the command as well, which
-                        # also covers programs that swallow that line.
                         if exit_code_seen:
                             done = True
                             break

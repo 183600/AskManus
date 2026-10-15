@@ -55,8 +55,6 @@ class SandboxManager:
         self._global_lock = asyncio.Lock()
         self._active_operations: Set[str] = set()
 
-        # Cache of images known to exist locally (avoids a blocking
-        # round-trip to the Docker daemon on every sandbox creation)
         self._available_images: Set[str] = set()
 
         # Cleanup task

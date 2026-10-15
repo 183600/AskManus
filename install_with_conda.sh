@@ -72,7 +72,7 @@ cat > config/config.toml << 'EOF'
 [llm]
 model = "glm-4v-flash"
 base_url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-api_key = "b6e23abec9b746adb20cb0f3ae116f8e.LIlANJZWSUCbXLnX"
+api_key = "YOUR_API_KEY"
 max_tokens = 4096
 temperature = 0.0
 
@@ -80,7 +80,7 @@ temperature = 0.0
 [llm.vision]
 model = "glm-4v-flash"
 base_url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-api_key = "b6e23abec9b746adb20cb0f3ae116f8e.LIlANJZWSUCbXLnX"
+api_key = "YOUR_API_KEY"
 max_tokens = 4096
 temperature = 0.0
 EOF

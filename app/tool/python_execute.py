@@ -70,8 +70,6 @@ class PythonExecute(BaseTool):
         )
         proc.start()
 
-        # Drain the queue while the child runs so that large results can be
-        # transferred through the pipe without blocking the child forever.
         result = None
         deadline = time.monotonic() + timeout
         while True:
@@ -81,8 +79,6 @@ class PythonExecute(BaseTool):
             if not proc.is_alive():
                 break
             if result is not None:
-                # Result received; give the child the rest of the deadline
-                # to shut down cleanly.
                 proc.join(remaining)
                 break
             try:
@@ -101,7 +97,6 @@ class PythonExecute(BaseTool):
         proc.join()
 
         if result is None:
-            # The child flushed the queue right before exiting; collect it now.
             try:
                 result = result_queue.get(timeout=1)
             except _queue.Empty:

@@ -57,8 +57,6 @@ class ToolCallAgent(ReActAgent):
         except ValueError:
             raise
         except Exception as e:
-            # TokenLimitExceeded is raised directly (it is never retried) but
-            # may still arrive wrapped by a retry helper as its cause.
             if isinstance(e, TokenLimitExceeded):
                 token_limit_error = e
             elif hasattr(e, "__cause__") and isinstance(e.__cause__, TokenLimitExceeded):
