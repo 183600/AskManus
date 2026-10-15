@@ -233,10 +233,12 @@ class SandboxManager:
 
         if cleanup_tasks:
             # Wait for all cleanup tasks to complete, with timeout to avoid infinite waiting
-            try:
-                await asyncio.wait(cleanup_tasks, timeout=30.0)
-            except asyncio.TimeoutError:
+            _, pending = await asyncio.wait(cleanup_tasks, timeout=30.0)
+            if pending:
                 logger.error("Sandbox cleanup timed out")
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
 
         # Clean up remaining references
         self._sandboxes.clear()

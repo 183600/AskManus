@@ -321,6 +321,7 @@ class WebSearch(BaseTool):
             )
 
             if not search_items:
+                failed_engines.append(engine_name)
                 continue
 
             if failed_engines:
@@ -433,4 +434,4 @@ if __name__ == "__main__":
             query="Python programming", fetch_content=True, num_results=1
         )
     )
-    print(search_response.to_tool_result())
+    print(search_response)

@@ -184,8 +184,11 @@ class DockerSession:
                 exit_code_seen = False
                 idle_timeout = 0.1
 
+                marker_pending: Optional[bytes] = None
+
                 def process(chunk: bytes) -> None:
                     nonlocal buffer, command_sent, exit_echo_seen, exit_code_seen
+                    nonlocal marker_pending
                     buffer.extend(chunk)
 
                     # Consume only complete lines, scanning just the newly
@@ -203,12 +206,29 @@ class DockerSession:
                             command_sent = True
                             continue
 
-                        if stripped in (b"echo $?", b"$ echo $?"):
-                            exit_echo_seen = True
-                            continue
+                        # The tty prints the prompt before echoing the
+                        # `echo $?` line, so the marker always appears as
+                        # `$ echo $?`. A line ending with the marker is either
+                        # the real marker or output that contains it, so hold
+                        # it until the next line decides: the real marker is
+                        # always followed by the exit code line.
+                        if marker_pending is not None:
+                            if stripped.isdigit() and not exit_code_seen:
+                                prefix = marker_pending[
+                                    : marker_pending.rfind(b"$ echo $?")
+                                ].rstrip(b"\r")
+                                if prefix.strip():
+                                    result_lines.append(prefix)
+                                exit_echo_seen = True
+                                exit_code_seen = True
+                                continue
+                            # The held line was ordinary output.
+                            result_lines.append(marker_pending)
+                            marker_pending = None
 
                         if not exit_echo_seen and stripped.endswith(b"$ echo $?"):
-                            exit_echo_seen = True
+                            marker_pending = line
+                            continue
 
                         if exit_echo_seen and stripped.isdigit():
                             exit_code_seen = True
@@ -236,6 +256,9 @@ class DockerSession:
                                 loop.sock_recv(self.socket, 4096), idle_timeout
                             )
                         except asyncio.TimeoutError:
+                            # Some programs consume the `echo $?` line (for
+                            # example apt reads stdin), so a prompt followed by
+                            # an idle stream marks the end of the command too.
                             done = True
                             break
                         if not chunk:

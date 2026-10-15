@@ -50,7 +50,7 @@ class CreateChatCompletion(BaseTool):
             return {
                 "type": "object",
                 "properties": schema["properties"],
-                "required": schema.get("required", self.required),
+                "required": schema.get("required", []),
             }
 
         return self._create_type_schema(self.response_type)

@@ -4,7 +4,7 @@ import re
 import time
 from typing import List, Optional, Set
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.exceptions import ToolError
 from app.llm import LLM
@@ -72,6 +72,16 @@ class ResearchInsight(BaseModel):
     relevance_score: float = Field(
         default=1.0, description="Relevance score (0.0-1.0)", ge=0.0, le=1.0
     )
+
+    @field_validator("relevance_score", mode="before")
+    @classmethod
+    def _coerce_relevance_score(cls, value):
+        """Clamp LLM-provided scores instead of failing on odd values."""
+        try:
+            score = float(value)
+        except (TypeError, ValueError):
+            return FALLBACK_RELEVANCE_SCORE
+        return max(0.0, min(1.0, score))
 
     def __str__(self) -> str:
         """Format insight as string with source attribution."""

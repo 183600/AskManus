@@ -214,7 +214,10 @@ class AskUser(BaseTool):
             return input(prompt_text)
 
         def _read_pipe() -> str:
-            return stdin.readline()
+            line = stdin.readline()
+            if line == "":
+                raise EOFError
+            return line
 
         try:
             if stdin.isatty():
@@ -242,9 +245,10 @@ class AskUser(BaseTool):
 
         def _worker() -> None:
             try:
-                line = read_func()
-                result: Optional[str] = line if line != "" else None
-            except EOFError:
+                # An empty string is a blank answer (invalid input), only
+                # EOF maps to None ("stream closed").
+                result: Optional[str] = read_func()
+            except (EOFError, OSError):
                 result = None
             except Exception:
                 result = None

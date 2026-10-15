@@ -1,6 +1,7 @@
 import asyncio
 import io
 import os
+import shlex
 import tarfile
 import tempfile
 import uuid
@@ -243,7 +244,7 @@ class DockerSandbox:
 
             # Create parent directory
             if parent_dir:
-                await self.run_command(f"mkdir -p {parent_dir}")
+                await self.run_command(f"mkdir -p {shlex.quote(parent_dir)}")
 
             # Prepare file data
             tar_stream = await self._create_tar_stream(
@@ -370,7 +371,7 @@ class DockerSandbox:
             resolved_dst = self._safe_resolve_path(dst_path)
             container_dir = os.path.dirname(resolved_dst)
             if container_dir:
-                await self.run_command(f"mkdir -p {container_dir}")
+                await self.run_command(f"mkdir -p {shlex.quote(container_dir)}")
 
             tar_buffer = io.BytesIO()
             with tarfile.open(fileobj=tar_buffer, mode="w") as tar:
@@ -397,10 +398,14 @@ class DockerSandbox:
                 tar_buffer,
             )
 
-                # Verify file was created successfully
+            # Verify file was created successfully
             try:
-                await self.run_command(f"test -e {resolved_dst}")
+                verify_output = await self.run_command(
+                    f"test -e {shlex.quote(resolved_dst)} || echo __MISSING__"
+                )
             except Exception:
+                raise RuntimeError(f"Failed to verify file creation: {dst_path}")
+            if "__MISSING__" in verify_output:
                 raise RuntimeError(f"Failed to verify file creation: {dst_path}")
 
         except FileNotFoundError:

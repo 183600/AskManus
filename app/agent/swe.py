@@ -16,8 +16,8 @@ class SWEAgent(ToolCallAgent):
     system_prompt: str = SYSTEM_PROMPT
     next_step_prompt: str = ""
 
-    available_tools: ToolCollection = ToolCollection(
-        Bash(), StrReplaceEditor(), Terminate()
+    available_tools: ToolCollection = Field(
+        default_factory=lambda: ToolCollection(Bash(), StrReplaceEditor(), Terminate())
     )
     special_tool_names: List[str] = Field(default_factory=lambda: [Terminate().name])
 

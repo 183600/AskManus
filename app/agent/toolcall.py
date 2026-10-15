@@ -24,8 +24,8 @@ class ToolCallAgent(ReActAgent):
     system_prompt: str = SYSTEM_PROMPT
     next_step_prompt: str = NEXT_STEP_PROMPT
 
-    available_tools: ToolCollection = ToolCollection(
-        CreateChatCompletion(), Terminate()
+    available_tools: ToolCollection = Field(
+        default_factory=lambda: ToolCollection(CreateChatCompletion(), Terminate())
     )
     tool_choices: TOOL_CHOICE_TYPE = ToolChoice.AUTO  # type: ignore
     special_tool_names: List[str] = Field(default_factory=lambda: [Terminate().name])
