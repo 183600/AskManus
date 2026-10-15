@@ -172,18 +172,23 @@ class BaseAgent(BaseModel, ABC):
         if len(self.memory.messages) < 2:
             return False
 
-        last_message = self.memory.messages[-1]
-        if not last_message.content:
+        messages = self.memory.messages
+        last_message = messages[-1]
+        last_content = last_message.content
+        if not last_content:
             return False
 
-        # Count identical content occurrences
-        duplicate_count = sum(
-            1
-            for msg in reversed(self.memory.messages[:-1])
-            if msg.role == "assistant" and msg.content == last_message.content
-        )
+        # Count identical content occurrences, stopping as soon as the
+        # duplicate threshold is reached instead of scanning all messages.
+        duplicate_count = 0
+        for index in range(len(messages) - 2, -1, -1):
+            msg = messages[index]
+            if msg.role == "assistant" and msg.content == last_content:
+                duplicate_count += 1
+                if duplicate_count >= self.duplicate_threshold:
+                    return True
 
-        return duplicate_count >= self.duplicate_threshold
+        return False
 
     @property
     def messages(self) -> List[Message]:

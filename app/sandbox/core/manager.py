@@ -111,7 +111,7 @@ class SandboxManager:
 
             self._active_operations.add(sandbox_id)
             try:
-                self._last_used[sandbox_id] = asyncio.get_event_loop().time()
+                self._last_used[sandbox_id] = asyncio.get_running_loop().time()
                 yield self._sandboxes[sandbox_id]
             finally:
                 self._active_operations.remove(sandbox_id)
@@ -149,7 +149,7 @@ class SandboxManager:
                 await sandbox.create()
 
                 self._sandboxes[sandbox_id] = sandbox
-                self._last_used[sandbox_id] = asyncio.get_event_loop().time()
+                self._last_used[sandbox_id] = asyncio.get_running_loop().time()
                 self._locks[sandbox_id] = asyncio.Lock()
 
                 logger.info(f"Created sandbox {sandbox_id}")
@@ -191,7 +191,7 @@ class SandboxManager:
 
     async def _cleanup_idle_sandboxes(self) -> None:
         """Cleans up idle sandboxes."""
-        current_time = asyncio.get_event_loop().time()
+        current_time = asyncio.get_running_loop().time()
         to_cleanup = []
 
         async with self._global_lock:

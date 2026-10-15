@@ -1,11 +1,20 @@
+import asyncio
 import multiprocessing
 import queue as _queue
 import sys
 import time
 from io import StringIO
-from typing import Dict
+from typing import Dict, Optional
 
 from app.tool.base import BaseTool
+
+
+def _get_result(result_queue: multiprocessing.Queue, timeout: float) -> Optional[Dict]:
+    """Fetch the child's result, returning None when none arrives in time."""
+    try:
+        return result_queue.get(timeout=timeout)
+    except _queue.Empty:
+        return None
 
 
 class PythonExecute(BaseTool):
@@ -70,26 +79,31 @@ class PythonExecute(BaseTool):
         )
         proc.start()
 
-        result = None
-        deadline = time.monotonic() + timeout
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            if not proc.is_alive():
-                break
-            if result is not None:
-                proc.join(remaining)
-                break
-            try:
-                result = result_queue.get(timeout=min(0.1, remaining))
-            except _queue.Empty:
-                continue
+        def _wait_for_result() -> Optional[Dict]:
+            """Collect the child's result without blocking the event loop."""
+            result = None
+            deadline = time.monotonic() + timeout
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                if not proc.is_alive():
+                    break
+                if result is not None:
+                    proc.join(remaining)
+                    break
+                try:
+                    result = result_queue.get(timeout=min(0.1, remaining))
+                except _queue.Empty:
+                    continue
+            return result
+
+        result = await asyncio.to_thread(_wait_for_result)
 
         # timeout process
         if proc.is_alive():
             proc.terminate()
-            proc.join(1)
+            await asyncio.to_thread(proc.join, 1)
             return {
                 "observation": f"Execution timeout after {timeout} seconds",
                 "success": False,
@@ -97,8 +111,7 @@ class PythonExecute(BaseTool):
         proc.join()
 
         if result is None:
-            try:
-                result = result_queue.get(timeout=1)
-            except _queue.Empty:
+            result = await asyncio.to_thread(_get_result, result_queue, 1)
+            if result is None:
                 result = {"observation": "", "success": False}
         return result

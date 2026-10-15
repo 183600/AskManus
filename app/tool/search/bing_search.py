@@ -33,6 +33,7 @@ HEADERS = {
 
 BING_HOST_URL = "https://www.bing.com"
 BING_SEARCH_URL = "https://www.bing.com/search?q="
+REQUEST_TIMEOUT = 10
 
 
 class BingSearchEngine(WebSearchEngine):
@@ -84,7 +85,7 @@ class BingSearchEngine(WebSearchEngine):
             tuple: (List of SearchItem objects, next page URL or None)
         """
         try:
-            res = self.session.get(url=url)
+            res = self.session.get(url=url, timeout=REQUEST_TIMEOUT)
             res.encoding = "utf-8"
             root = BeautifulSoup(res.text, "lxml")
 

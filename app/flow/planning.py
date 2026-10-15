@@ -1,4 +1,5 @@
 import json
+import re
 import time
 from enum import Enum
 from typing import Dict, List, Optional, Union
@@ -11,6 +12,9 @@ from app.llm import LLM
 from app.logger import logger
 from app.schema import AgentState, Message, ToolChoice
 from app.tool import PlanningTool
+
+
+_STEP_TYPE_PATTERN = re.compile(r"\[([A-Z_]+)\]")
 
 
 class PlanStepStatus(str, Enum):
@@ -211,20 +215,19 @@ class PlanningFlow(BaseFlow):
             step_statuses = plan_data.get("step_statuses", [])
 
             # Find first non-completed step
+            active_statuses = PlanStepStatus.get_active_statuses()
             for i, step in enumerate(steps):
                 if i >= len(step_statuses):
                     status = PlanStepStatus.NOT_STARTED.value
                 else:
                     status = step_statuses[i]
 
-                if status in PlanStepStatus.get_active_statuses():
+                if status in active_statuses:
                     # Extract step type/category if available
                     step_info = {"text": step}
 
                     # Try to extract step type from the text (e.g., [SEARCH] or [CODE])
-                    import re
-
-                    type_match = re.search(r"\[([A-Z_]+)\]", step)
+                    type_match = _STEP_TYPE_PATTERN.search(step)
                     if type_match:
                         step_info["type"] = type_match.group(1).lower()
 

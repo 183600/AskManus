@@ -15,6 +15,34 @@ from app.sandbox.core.exceptions import SandboxTimeoutError
 from app.sandbox.core.terminal import AsyncDockerizedTerminal
 
 
+class _ChunkStreamReader:
+    """Minimal file-like wrapper around an iterable of byte chunks.
+
+    ``tarfile`` in streaming mode only needs ``read``, which allows Docker
+    archives to be unpacked without buffering the whole archive in memory.
+    """
+
+    __slots__ = ("_chunks", "_buffer")
+
+    def __init__(self, chunks) -> None:
+        self._chunks = iter(chunks)
+        self._buffer = b""
+
+    def read(self, size: int = -1) -> bytes:
+        if size is None or size < 0:
+            self._buffer += b"".join(self._chunks)
+            data, self._buffer = self._buffer, b""
+            return data
+        while len(self._buffer) < size:
+            try:
+                self._buffer += next(self._chunks)
+            except StopIteration:
+                break
+        data = self._buffer[:size]
+        self._buffer = self._buffer[size:]
+        return data
+
+
 class DockerSandbox:
     """Docker sandbox environment.
 
@@ -87,9 +115,10 @@ class DockerSandbox:
             # Start container
             await asyncio.to_thread(self.container.start)
 
-            # Initialize terminal
+            # Initialize terminal, reusing the already resolved container
+            # object instead of forcing another Docker API lookup.
             self.terminal = AsyncDockerizedTerminal(
-                container["Id"],
+                self.container,
                 self.config.work_dir,
                 env_vars={"PYTHONUNBUFFERED": "1"}
                 # Ensure Python output is not buffered
@@ -275,38 +304,52 @@ class DockerSandbox:
                 self.container.get_archive, resolved_src
             )
 
-            buffer = io.BytesIO()
-            for chunk in stream:
-                buffer.write(chunk)
-            buffer.seek(0)
-
-            with tarfile.open(fileobj=buffer) as tar:
-                members = tar.getmembers()
-                if not members:
-                    raise FileNotFoundError(f"Source file is empty: {src_path}")
-
-                # If destination is a directory, we should preserve relative path structure
-                if os.path.isdir(dst_path):
-                    tar.extractall(dst_path)
-                else:
-                    # If destination is a file, we only extract the source file's content
-                    if len(members) > 1:
-                        raise RuntimeError(
-                            f"Source path is a directory but destination is a file: {src_path}"
-                        )
-
-                    with open(dst_path, "wb") as dst:
-                        src_file = tar.extractfile(members[0])
-                        if src_file is None:
-                            raise RuntimeError(
-                                f"Failed to extract file: {src_path}"
-                            )
-                        dst.write(src_file.read())
+            # Stream the archive straight to disk instead of buffering it
+            # in memory first; the blocking stream is consumed off-loop.
+            await asyncio.to_thread(
+                self._extract_archive_stream, stream, src_path, dst_path
+            )
 
         except docker.errors.NotFound:
             raise FileNotFoundError(f"Source file not found: {src_path}")
         except Exception as e:
             raise RuntimeError(f"Failed to copy file: {e}")
+
+    @staticmethod
+    def _extract_archive_stream(stream, src_path: str, dst_path: str) -> None:
+        """Extracts a Docker archive stream to ``dst_path``.
+
+        Args:
+            stream: Iterable of raw tar bytes from Docker.
+            src_path: Original source path (for error messages).
+            dst_path: Destination path on the host (file or directory).
+        """
+        reader = _ChunkStreamReader(stream)
+
+        # If destination is a directory, preserve the relative path structure.
+        if os.path.isdir(dst_path):
+            with tarfile.open(fileobj=reader, mode="r|") as tar:
+                tar.extractall(dst_path)
+            return
+
+        # If destination is a file, only extract the source file's content.
+        with tarfile.open(fileobj=reader, mode="r|") as tar:
+            member = tar.next()
+            if not member:
+                raise FileNotFoundError(f"Source file is empty: {src_path}")
+
+            src_file = tar.extractfile(member)
+            if src_file is None:
+                raise RuntimeError(f"Failed to extract file: {src_path}")
+            data = src_file.read()
+
+            if tar.next() is not None:
+                raise RuntimeError(
+                    f"Source path is a directory but destination is a file: {src_path}"
+                )
+
+            with open(dst_path, "wb") as dst:
+                dst.write(data)
 
     async def copy_to(self, src_path: str, dst_path: str) -> None:
         """Copies a file to the container.
@@ -345,11 +388,13 @@ class DockerSandbox:
                     # Add single file to tar
                     tar.add(src_path, arcname=os.path.basename(dst_path))
 
-            # Upload to container
+            # Upload to container (pass the buffer directly to avoid an
+            # extra full copy of the archive bytes).
+            tar_buffer.seek(0)
             await asyncio.to_thread(
                 self.container.put_archive,
                 os.path.dirname(resolved_dst) or "/",
-                tar_buffer.getvalue(),
+                tar_buffer,
             )
 
                 # Verify file was created successfully
@@ -384,7 +429,7 @@ class DockerSandbox:
 
     @staticmethod
     async def _read_from_tar(tar_stream) -> bytes:
-        """Reads file content from a tar stream.
+        """Reads file content from a tar stream without materializing it.
 
         Args:
             tar_stream: Tar file stream.
@@ -395,21 +440,24 @@ class DockerSandbox:
         Raises:
             RuntimeError: If read operation fails.
         """
-        buffer = io.BytesIO()
-        for chunk in tar_stream:
-            buffer.write(chunk)
-        buffer.seek(0)
 
-        with tarfile.open(fileobj=buffer) as tar:
-            member = tar.next()
-            if not member:
-                raise RuntimeError("Empty tar archive")
+        def _read() -> bytes:
+            with tarfile.open(
+                fileobj=_ChunkStreamReader(tar_stream), mode="r|"
+            ) as tar:
+                member = tar.next()
+                if not member:
+                    raise RuntimeError("Empty tar archive")
 
-            file_content = tar.extractfile(member)
-            if not file_content:
-                raise RuntimeError("Failed to extract file content")
+                file_content = tar.extractfile(member)
+                if not file_content:
+                    raise RuntimeError("Failed to extract file content")
 
-            return file_content.read()
+                return file_content.read()
+
+        # The Docker stream performs blocking socket reads, so consume it
+        # in a worker thread to keep the event loop responsive.
+        return await asyncio.to_thread(_read)
 
     async def cleanup(self) -> None:
         """Cleans up sandbox resources."""

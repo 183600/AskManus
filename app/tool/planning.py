@@ -10,6 +10,13 @@ A planning tool that allows the agent to create and manage plans for solving com
 The tool provides functionality for creating plans, updating plan steps, and tracking progress.
 """
 
+_STATUS_SYMBOLS = {
+    "not_started": "[ ]",
+    "in_progress": "[→]",
+    "completed": "[✓]",
+    "blocked": "[!]",
+}
+
 
 class PlanningTool(BaseTool):
     """
@@ -349,12 +356,7 @@ class PlanningTool(BaseTool):
         for i, (step, status, notes) in enumerate(
             zip(plan["steps"], plan["step_statuses"], plan["step_notes"])
         ):
-            status_symbol = {
-                "not_started": "[ ]",
-                "in_progress": "[→]",
-                "completed": "[✓]",
-                "blocked": "[!]",
-            }.get(status, "[ ]")
+            status_symbol = _STATUS_SYMBOLS.get(status, "[ ]")
 
             output += f"{i}. {status_symbol} {step}\n"
             if notes:

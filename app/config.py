@@ -162,9 +162,7 @@ class Config:
     def _load_initial_config(self):
         raw_config = self._load_config()
         base_llm = raw_config.get("llm", {})
-        llm_overrides = {
-            k: v for k, v in raw_config.get("llm", {}).items() if isinstance(v, dict)
-        }
+        llm_overrides = {k: v for k, v in base_llm.items() if isinstance(v, dict)}
 
         default_settings = {
             "model": base_llm.get("model"),

@@ -21,7 +21,9 @@ class BrowserContextHelper:
         self._current_base64_image: Optional[str] = None
 
     async def get_browser_state(self) -> Optional[dict]:
-        browser_tool = self.agent.available_tools.get_tool(BrowserUseTool().name)
+        browser_tool = self.agent.available_tools.get_tool(
+            BrowserUseTool.model_fields["name"].default
+        )
         if not browser_tool or not hasattr(browser_tool, "get_current_state"):
             logger.warning("BrowserUseTool not found or doesn't have get_current_state")
             return None
@@ -74,7 +76,9 @@ class BrowserContextHelper:
         )
 
     async def cleanup_browser(self):
-        browser_tool = self.agent.available_tools.get_tool(BrowserUseTool().name)
+        browser_tool = self.agent.available_tools.get_tool(
+            BrowserUseTool.model_fields["name"].default
+        )
         if browser_tool and hasattr(browser_tool, "cleanup"):
             await browser_tool.cleanup()
 

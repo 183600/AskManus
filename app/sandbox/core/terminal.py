@@ -17,13 +17,15 @@ from docker.models.containers import Container
 
 
 class DockerSession:
-    def __init__(self, container_id: str) -> None:
+    def __init__(self, container_id: str, api: Optional[APIClient] = None) -> None:
         """Initializes a Docker session.
 
         Args:
             container_id: ID of the Docker container.
+            api: Optional existing Docker API client to reuse instead of
+                creating a new connection pool.
         """
-        self.api = APIClient()
+        self.api = api if api is not None else APIClient()
         self.container_id = container_id
         self.exec_id = None
         self.socket = None
@@ -47,7 +49,8 @@ class DockerSession:
             "exec bash --norc --noprofile",
         ]
 
-        exec_data = self.api.exec_create(
+        exec_data = await asyncio.to_thread(
+            self.api.exec_create,
             self.container_id,
             startup_command,
             stdin=True,
@@ -60,8 +63,13 @@ class DockerSession:
         )
         self.exec_id = exec_data["Id"]
 
-        socket_data = self.api.exec_start(
-            self.exec_id, socket=True, tty=True, stream=True, demux=True
+        socket_data = await asyncio.to_thread(
+            self.api.exec_start,
+            self.exec_id,
+            socket=True,
+            tty=True,
+            stream=True,
+            demux=True,
         )
 
         if hasattr(socket_data, "_sock"):
@@ -100,11 +108,17 @@ class DockerSession:
 
             if self.exec_id:
                 try:
-                    # Check exec instance status
-                    exec_inspect = self.api.exec_inspect(self.exec_id)
-                    if exec_inspect.get("Running", False):
-                        # If still running, wait for it to complete
-                        await asyncio.sleep(0.5)
+                    # Wait (bounded) until the exec instance stops running
+                    # instead of sleeping a fixed amount of time.
+                    loop = asyncio.get_running_loop()
+                    deadline = loop.time() + 1.0
+                    while loop.time() < deadline:
+                        exec_inspect = await asyncio.to_thread(
+                            self.api.exec_inspect, self.exec_id
+                        )
+                        if not exec_inspect.get("Running", False):
+                            break
+                        await asyncio.sleep(0.05)
                 except:
                     pass  # Ignore inspection errors, continue cleanup
 
@@ -124,12 +138,18 @@ class DockerSession:
             socket.error: If socket communication fails.
         """
         loop = asyncio.get_running_loop()
+        marker = b"$ "
         buffer = bytearray()
-        while b"$ " not in buffer:
+        while True:
             chunk = await loop.sock_recv(self.socket, 4096)
             if not chunk:
                 break
+            # Only search the newly received bytes plus one byte of overlap,
+            # so repeated scans stay linear in the total output size.
+            search_from = max(0, len(buffer) - (len(marker) - 1))
             buffer.extend(chunk)
+            if buffer.find(marker, search_from) != -1:
+                break
         return buffer.decode("utf-8")
 
     async def execute(self, command: str, timeout: Optional[int] = None) -> str:
@@ -167,13 +187,16 @@ class DockerSession:
                 def process(chunk: bytes) -> None:
                     nonlocal buffer, command_sent, exit_echo_seen, exit_code_seen
                     buffer.extend(chunk)
-                    lines = buffer.split(b"\n")
 
-                    buffer = lines[-1]
-                    lines = lines[:-1]
-
-                    for line in lines:
-                        line = line.rstrip(b"\r")
+                    # Consume only complete lines, scanning just the newly
+                    # received bytes instead of re-splitting the whole buffer.
+                    start = 0
+                    while True:
+                        newline = buffer.find(b"\n", start)
+                        if newline == -1:
+                            break
+                        line = bytes(buffer[start:newline]).rstrip(b"\r")
+                        start = newline + 1
                         stripped = line.strip()
 
                         if not command_sent:
@@ -193,6 +216,9 @@ class DockerSession:
 
                         if stripped:
                             result_lines.append(line)
+
+                    if start:
+                        del buffer[:start]
 
                 while True:
                     chunk = await loop.sock_recv(self.socket, 4096)
@@ -285,7 +311,7 @@ class AsyncDockerizedTerminal:
             env_vars: Environment variables to set.
             default_timeout: Default command execution timeout in seconds.
         """
-        self.client = docker.from_env()
+        self._client = None
         self.container = (
             container
             if isinstance(container, Container)
@@ -295,6 +321,13 @@ class AsyncDockerizedTerminal:
         self.env_vars = env_vars or {}
         self.default_timeout = default_timeout
         self.session = None
+
+    @property
+    def client(self) -> docker.DockerClient:
+        """Docker client, created lazily only when it is actually needed."""
+        if self._client is None:
+            self._client = docker.from_env()
+        return self._client
 
     async def init(self) -> None:
         """Initializes the terminal environment.
@@ -306,7 +339,11 @@ class AsyncDockerizedTerminal:
         """
         await self._ensure_workdir()
 
-        self.session = DockerSession(self.container.id)
+        # Reuse the API client that owns this container when available so we
+        # don't open an additional connection pool for the session.
+        container_client = getattr(self.container, "client", None)
+        api = container_client.api if container_client is not None else None
+        self.session = DockerSession(self.container.id, api)
         await self.session.create(self.working_dir, self.env_vars)
 
     async def _ensure_workdir(self) -> None:

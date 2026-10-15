@@ -1,5 +1,5 @@
 """Collection classes for managing multiple tools."""
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app.exceptions import ToolError
 from app.tool.base import BaseTool, ToolFailure, ToolResult
@@ -14,12 +14,19 @@ class ToolCollection:
     def __init__(self, *tools: BaseTool):
         self.tools = tools
         self.tool_map = {tool.name: tool for tool in tools}
+        self._params_cache: Optional[List[Dict[str, Any]]] = None
+        self._params_cache_for = None
 
     def __iter__(self):
         return iter(self.tools)
 
     def to_params(self) -> List[Dict[str, Any]]:
-        return [tool.to_param() for tool in self.tools]
+        # Cache the serialized schemas until the underlying tool tuple changes
+        # (identity check also covers direct reassignment of ``self.tools``).
+        if self._params_cache is None or self._params_cache_for is not self.tools:
+            self._params_cache = [tool.to_param() for tool in self.tools]
+            self._params_cache_for = self.tools
+        return list(self._params_cache)
 
     async def execute(
         self, *, name: str, tool_input: Dict[str, Any] = None
