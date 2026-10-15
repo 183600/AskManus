@@ -197,3 +197,7 @@ cython_debug/
 
 # OSX
 .DS_Store
+
+# continuous-loop artifacts (must never be committed)
+.opencode/
+opencode.json
