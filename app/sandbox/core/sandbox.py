@@ -275,37 +275,35 @@ class DockerSandbox:
                 self.container.get_archive, resolved_src
             )
 
-            # Create temporary directory to extract file
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                # Write stream to temporary file
-                tar_path = os.path.join(tmp_dir, "temp.tar")
-                with open(tar_path, "wb") as f:
-                    for chunk in stream:
-                        f.write(chunk)
+            # Buffer the stream in memory and extract from it directly,
+            # avoiding a temporary file round-trip on disk.
+            buffer = io.BytesIO()
+            for chunk in stream:
+                buffer.write(chunk)
+            buffer.seek(0)
 
-                # Extract file
-                with tarfile.open(tar_path) as tar:
-                    members = tar.getmembers()
-                    if not members:
-                        raise FileNotFoundError(f"Source file is empty: {src_path}")
+            with tarfile.open(fileobj=buffer) as tar:
+                members = tar.getmembers()
+                if not members:
+                    raise FileNotFoundError(f"Source file is empty: {src_path}")
 
-                    # If destination is a directory, we should preserve relative path structure
-                    if os.path.isdir(dst_path):
-                        tar.extractall(dst_path)
-                    else:
-                        # If destination is a file, we only extract the source file's content
-                        if len(members) > 1:
+                # If destination is a directory, we should preserve relative path structure
+                if os.path.isdir(dst_path):
+                    tar.extractall(dst_path)
+                else:
+                    # If destination is a file, we only extract the source file's content
+                    if len(members) > 1:
+                        raise RuntimeError(
+                            f"Source path is a directory but destination is a file: {src_path}"
+                        )
+
+                    with open(dst_path, "wb") as dst:
+                        src_file = tar.extractfile(members[0])
+                        if src_file is None:
                             raise RuntimeError(
-                                f"Source path is a directory but destination is a file: {src_path}"
+                                f"Failed to extract file: {src_path}"
                             )
-
-                        with open(dst_path, "wb") as dst:
-                            src_file = tar.extractfile(members[0])
-                            if src_file is None:
-                                raise RuntimeError(
-                                    f"Failed to extract file: {src_path}"
-                                )
-                            dst.write(src_file.read())
+                        dst.write(src_file.read())
 
         except docker.errors.NotFound:
             raise FileNotFoundError(f"Source file not found: {src_path}")
@@ -333,41 +331,35 @@ class DockerSandbox:
             if container_dir:
                 await self.run_command(f"mkdir -p {container_dir}")
 
-            # Create tar file to upload
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                tar_path = os.path.join(tmp_dir, "temp.tar")
-                with tarfile.open(tar_path, "w") as tar:
-                    # Handle directory source path
-                    if os.path.isdir(src_path):
-                        os.path.basename(src_path.rstrip("/"))
-                        for root, _, files in os.walk(src_path):
-                            for file in files:
-                                file_path = os.path.join(root, file)
-                                arcname = os.path.join(
-                                    os.path.basename(dst_path),
-                                    os.path.relpath(file_path, src_path),
-                                )
-                                tar.add(file_path, arcname=arcname)
-                    else:
-                        # Add single file to tar
-                        tar.add(src_path, arcname=os.path.basename(dst_path))
+            # Build the tar archive in memory to avoid a temporary file on disk
+            tar_buffer = io.BytesIO()
+            with tarfile.open(fileobj=tar_buffer, mode="w") as tar:
+                # Handle directory source path
+                if os.path.isdir(src_path):
+                    for root, _, files in os.walk(src_path):
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            arcname = os.path.join(
+                                os.path.basename(dst_path),
+                                os.path.relpath(file_path, src_path),
+                            )
+                            tar.add(file_path, arcname=arcname)
+                else:
+                    # Add single file to tar
+                    tar.add(src_path, arcname=os.path.basename(dst_path))
 
-                # Read tar file content
-                with open(tar_path, "rb") as f:
-                    data = f.read()
-
-                # Upload to container
-                await asyncio.to_thread(
-                    self.container.put_archive,
-                    os.path.dirname(resolved_dst) or "/",
-                    data,
-                )
+            # Upload to container
+            await asyncio.to_thread(
+                self.container.put_archive,
+                os.path.dirname(resolved_dst) or "/",
+                tar_buffer.getvalue(),
+            )
 
                 # Verify file was created successfully
-                try:
-                    await self.run_command(f"test -e {resolved_dst}")
-                except Exception:
-                    raise RuntimeError(f"Failed to verify file creation: {dst_path}")
+            try:
+                await self.run_command(f"test -e {resolved_dst}")
+            except Exception:
+                raise RuntimeError(f"Failed to verify file creation: {dst_path}")
 
         except FileNotFoundError:
             raise
@@ -406,21 +398,21 @@ class DockerSandbox:
         Raises:
             RuntimeError: If read operation fails.
         """
-        with tempfile.NamedTemporaryFile() as tmp:
-            for chunk in tar_stream:
-                tmp.write(chunk)
-            tmp.seek(0)
+        buffer = io.BytesIO()
+        for chunk in tar_stream:
+            buffer.write(chunk)
+        buffer.seek(0)
 
-            with tarfile.open(fileobj=tmp) as tar:
-                member = tar.next()
-                if not member:
-                    raise RuntimeError("Empty tar archive")
+        with tarfile.open(fileobj=buffer) as tar:
+            member = tar.next()
+            if not member:
+                raise RuntimeError("Empty tar archive")
 
-                file_content = tar.extractfile(member)
-                if not file_content:
-                    raise RuntimeError("Failed to extract file content")
+            file_content = tar.extractfile(member)
+            if not file_content:
+                raise RuntimeError("Failed to extract file content")
 
-                return file_content.read()
+            return file_content.read()
 
     async def cleanup(self) -> None:
         """Cleans up sandbox resources."""

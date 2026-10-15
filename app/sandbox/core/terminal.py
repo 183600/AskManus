@@ -123,17 +123,13 @@ class DockerSession:
         Raises:
             socket.error: If socket communication fails.
         """
-        buffer = b""
+        loop = asyncio.get_running_loop()
+        buffer = bytearray()
         while b"$ " not in buffer:
-            try:
-                chunk = self.socket.recv(4096)
-                if chunk:
-                    buffer += chunk
-            except socket.error as e:
-                if e.errno == socket.EWOULDBLOCK:
-                    await asyncio.sleep(0.1)
-                    continue
-                raise
+            chunk = await loop.sock_recv(self.socket, 4096)
+            if not chunk:
+                break
+            buffer.extend(chunk)
         return buffer.decode("utf-8")
 
     async def execute(self, command: str, timeout: Optional[int] = None) -> str:
@@ -157,46 +153,72 @@ class DockerSession:
             # Sanitize command to prevent shell injection
             sanitized_command = self._sanitize_command(command)
             full_command = f"{sanitized_command}\necho $?\n"
-            self.socket.sendall(full_command.encode())
+            loop = asyncio.get_running_loop()
+            await loop.sock_sendall(self.socket, full_command.encode())
 
             async def read_output() -> str:
-                buffer = b""
+                buffer = bytearray()
                 result_lines = []
                 command_sent = False
+                exit_echo_seen = False
+                idle_timeout = 0.1
+
+                def process(chunk: bytes) -> None:
+                    nonlocal buffer, command_sent, exit_echo_seen
+                    buffer.extend(chunk)
+                    lines = buffer.split(b"\n")
+
+                    buffer = lines[-1]
+                    lines = lines[:-1]
+
+                    for line in lines:
+                        line = line.rstrip(b"\r")
+                        stripped = line.strip()
+
+                        if not command_sent:
+                            command_sent = True
+                            continue
+
+                        # The tty prints the prompt before echoing the
+                        # `echo $?` line; only a prompt after that echoed
+                        # line marks the true end of the command.
+                        if stripped in (b"echo $?", b"$ echo $?"):
+                            exit_echo_seen = True
+                            continue
+
+                        if stripped.isdigit():
+                            continue
+
+                        if stripped:
+                            result_lines.append(line)
 
                 while True:
-                    try:
-                        chunk = self.socket.recv(4096)
+                    chunk = await loop.sock_recv(self.socket, 4096)
+                    if not chunk:
+                        break
+                    process(chunk)
+
+                    done = False
+                    while buffer.endswith(b"$ "):
+                        if exit_echo_seen:
+                            done = True
+                            break
+                        # Intermediate prompt (some programs swallow the
+                        # `echo $?` line). Treat an idle stream as done,
+                        # matching the legacy polling behaviour.
+                        try:
+                            chunk = await asyncio.wait_for(
+                                loop.sock_recv(self.socket, 4096), idle_timeout
+                            )
+                        except asyncio.TimeoutError:
+                            done = True
+                            break
                         if not chunk:
+                            done = True
                             break
-
-                        buffer += chunk
-                        lines = buffer.split(b"\n")
-
-                        buffer = lines[-1]
-                        lines = lines[:-1]
-
-                        for line in lines:
-                            line = line.rstrip(b"\r")
-
-                            if not command_sent:
-                                command_sent = True
-                                continue
-
-                            if line.strip() == b"echo $?" or line.strip().isdigit():
-                                continue
-
-                            if line.strip():
-                                result_lines.append(line)
-
-                        if buffer.endswith(b"$ "):
-                            break
-
-                    except socket.error as e:
-                        if e.errno == socket.EWOULDBLOCK:
-                            await asyncio.sleep(0.1)
-                            continue
-                        raise
+                        process(chunk)
+                    if done:
+                        break
 
                 output = b"\n".join(result_lines).decode("utf-8")
                 output = re.sub(r"\n\$ echo \$\$?.*$", "", output)

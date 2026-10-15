@@ -55,6 +55,10 @@ class SandboxManager:
         self._global_lock = asyncio.Lock()
         self._active_operations: Set[str] = set()
 
+        # Cache of images known to exist locally (avoids a blocking
+        # round-trip to the Docker daemon on every sandbox creation)
+        self._available_images: Set[str] = set()
+
         # Cleanup task
         self._cleanup_task: Optional[asyncio.Task] = None
         self._is_shutting_down = False
@@ -71,15 +75,18 @@ class SandboxManager:
         Returns:
             bool: Whether image is available.
         """
+        if image in self._available_images:
+            return True
+
         try:
-            self._client.images.get(image)
+            await asyncio.to_thread(self._client.images.get, image)
+            self._available_images.add(image)
             return True
         except ImageNotFound:
             try:
                 logger.info(f"Pulling image {image}...")
-                await asyncio.get_event_loop().run_in_executor(
-                    None, self._client.images.pull, image
-                )
+                await asyncio.to_thread(self._client.images.pull, image)
+                self._available_images.add(image)
                 return True
             except (APIError, Exception) as e:
                 logger.error(f"Failed to pull image {image}: {e}")

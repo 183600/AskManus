@@ -13,7 +13,7 @@ from openai import (
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from tenacity import (
     retry,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
     wait_random_exponential,
 )
@@ -29,6 +29,13 @@ from app.schema import (
     Message,
     ToolChoice,
 )
+
+
+def _is_retryable(exception: BaseException) -> bool:
+    """Retry transient failures but never retry TokenLimitExceeded."""
+    if isinstance(exception, TokenLimitExceeded):
+        return False
+    return isinstance(exception, Exception)
 
 
 REASONING_MODELS = ["o1", "o3-mini"]
@@ -54,12 +61,36 @@ class TokenCounter:
     HIGH_DETAIL_TARGET_SHORT_SIDE = 768
     TILE_SIZE = 512
 
+    # Bounded cache for token counts of repeated strings (system prompts,
+    # tool descriptions, unchanged conversation turns, ...).
+    CACHE_MAX_ENTRIES = 4096
+    CACHE_MAX_TOTAL_CHARS = 4_000_000
+
     def __init__(self, tokenizer):
         self.tokenizer = tokenizer
+        self._cache: Dict[str, int] = {}
+        self._cache_chars = 0
 
     def count_text(self, text: str) -> int:
         """Calculate tokens for a text string"""
-        return 0 if not text else len(self.tokenizer.encode(text))
+        if not text:
+            return 0
+
+        cached = self._cache.get(text)
+        if cached is not None:
+            return cached
+
+        count = len(self.tokenizer.encode(text))
+
+        if (
+            len(self._cache) >= self.CACHE_MAX_ENTRIES
+            or self._cache_chars + len(text) > self.CACHE_MAX_TOTAL_CHARS
+        ):
+            self._cache.clear()
+            self._cache_chars = 0
+        self._cache[text] = count
+        self._cache_chars += len(text)
+        return count
 
     def count_image(self, image_item: dict) -> int:
         """
@@ -235,9 +266,7 @@ class LLM:
 
     def count_tokens(self, text: str) -> int:
         """Calculate the number of tokens in a text"""
-        if not text:
-            return 0
-        return len(self.tokenizer.encode(text))
+        return self.token_counter.count_text(text)
 
     def count_message_tokens(self, messages: List[dict]) -> int:
         return self.token_counter.count_message_tokens(messages)
@@ -361,9 +390,7 @@ class LLM:
     @retry(
         wait=wait_random_exponential(min=1, max=60),
         stop=stop_after_attempt(6),
-        retry=retry_if_exception_type(
-            (OpenAIError, Exception, ValueError)
-        ),  # Don't retry TokenLimitExceeded
+        retry=retry_if_exception(_is_retryable),  # Don't retry TokenLimitExceeded
     )
     async def ask(
         self,
@@ -445,15 +472,16 @@ class LLM:
             response = await self.client.chat.completions.create(**params, stream=True)
 
             collected_messages = []
-            completion_text = ""
             async for chunk in response:
-                chunk_message = chunk.choices[0].delta.content or ""
+                chunk_message = chunk.choices[0].delta.content
+                if not chunk_message:
+                    continue
                 collected_messages.append(chunk_message)
-                completion_text += chunk_message
                 print(chunk_message, end="", flush=True)
 
             print()  # Newline after streaming
-            full_response = "".join(collected_messages).strip()
+            completion_text = "".join(collected_messages)
+            full_response = completion_text.strip()
             if not full_response:
                 raise ValueError("Empty response from streaming LLM")
 
@@ -488,9 +516,7 @@ class LLM:
     @retry(
         wait=wait_random_exponential(min=1, max=60),
         stop=stop_after_attempt(6),
-        retry=retry_if_exception_type(
-            (OpenAIError, Exception, ValueError)
-        ),  # Don't retry TokenLimitExceeded
+        retry=retry_if_exception(_is_retryable),  # Don't retry TokenLimitExceeded
     )
     async def ask_with_images(
         self,
@@ -611,7 +637,9 @@ class LLM:
 
             collected_messages = []
             async for chunk in response:
-                chunk_message = chunk.choices[0].delta.content or ""
+                chunk_message = chunk.choices[0].delta.content
+                if not chunk_message:
+                    continue
                 collected_messages.append(chunk_message)
                 print(chunk_message, end="", flush=True)
 
@@ -644,9 +672,7 @@ class LLM:
     @retry(
         wait=wait_random_exponential(min=1, max=60),
         stop=stop_after_attempt(6),
-        retry=retry_if_exception_type(
-            (OpenAIError, Exception, ValueError)
-        ),  # Don't retry TokenLimitExceeded
+        retry=retry_if_exception(_is_retryable),  # Don't retry TokenLimitExceeded
     )
     async def ask_tool(
         self,

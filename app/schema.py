@@ -165,14 +165,14 @@ class Memory(BaseModel):
         self.messages.append(message)
         # Optional: Implement message limit
         if len(self.messages) > self.max_messages:
-            self.messages = self.messages[-self.max_messages :]
+            del self.messages[: len(self.messages) - self.max_messages]
 
     def add_messages(self, messages: List[Message]) -> None:
         """Add multiple messages to memory"""
         self.messages.extend(messages)
         # Optional: Implement message limit
         if len(self.messages) > self.max_messages:
-            self.messages = self.messages[-self.max_messages :]
+            del self.messages[: len(self.messages) - self.max_messages]
 
     def clear(self) -> None:
         """Clear all messages"""

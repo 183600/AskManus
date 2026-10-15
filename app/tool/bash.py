@@ -80,8 +80,12 @@ class _BashSession:
         # read output from the process, until the sentinel is found
         try:
             async with asyncio.timeout(self._timeout):
+                delay = 0.01
                 while True:
-                    await asyncio.sleep(self._output_delay)
+                    await asyncio.sleep(delay)
+                    # Poll quickly at first, then back off up to the configured
+                    # delay to avoid adding latency to fast commands.
+                    delay = min(delay * 2, self._output_delay)
                     # if we read directly from stdout/stderr, it will wait forever for
                     # EOF. use the StreamReader buffer directly instead.
                     output = (

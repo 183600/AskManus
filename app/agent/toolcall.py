@@ -57,12 +57,16 @@ class ToolCallAgent(ReActAgent):
         except ValueError:
             raise
         except Exception as e:
-            # Check if this is a RetryError containing TokenLimitExceeded
-            if hasattr(e, "__cause__") and isinstance(e.__cause__, TokenLimitExceeded):
+            # TokenLimitExceeded is raised directly (it is never retried) but
+            # may still arrive wrapped by a retry helper as its cause.
+            if isinstance(e, TokenLimitExceeded):
+                token_limit_error = e
+            elif hasattr(e, "__cause__") and isinstance(e.__cause__, TokenLimitExceeded):
                 token_limit_error = e.__cause__
-                logger.error(
-                    f"🚨 Token limit error (from RetryError): {token_limit_error}"
-                )
+            else:
+                token_limit_error = None
+            if token_limit_error is not None:
+                logger.error(f"🚨 Token limit error: {token_limit_error}")
                 self.memory.add_message(
                     Message.assistant_message(
                         f"Maximum token limit reached, cannot continue execution: {str(token_limit_error)}"

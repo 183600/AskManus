@@ -47,14 +47,18 @@ class LocalFileOperator(FileOperator):
     async def read_file(self, path: PathLike) -> str:
         """Read content from a local file."""
         try:
-            return Path(path).read_text(encoding=self.encoding)
+            return await asyncio.to_thread(
+                Path(path).read_text, encoding=self.encoding
+            )
         except Exception as e:
             raise ToolError(f"Failed to read {path}: {str(e)}") from None
 
     async def write_file(self, path: PathLike, content: str) -> None:
         """Write content to a local file."""
         try:
-            Path(path).write_text(content, encoding=self.encoding)
+            await asyncio.to_thread(
+                Path(path).write_text, content, encoding=self.encoding
+            )
         except Exception as e:
             raise ToolError(f"Failed to write to {path}: {str(e)}") from None
 

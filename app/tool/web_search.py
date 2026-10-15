@@ -1,4 +1,5 @@
 import asyncio
+import threading
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -103,6 +104,21 @@ class SearchResponse(ToolResult):
         return self
 
 
+_SESSION_LOCAL = threading.local()
+
+
+def _get_session() -> requests.Session:
+    """Return a per-thread requests session with connection pooling."""
+    session = getattr(_SESSION_LOCAL, "session", None)
+    if session is None:
+        session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(pool_connections=8, pool_maxsize=16)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        _SESSION_LOCAL.session = session
+    return session
+
+
 class WebContentFetcher:
     """Utility class for fetching web content."""
 
@@ -122,11 +138,15 @@ class WebContentFetcher:
             "WebSearch": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
 
+        def _fetch() -> requests.Response:
+            # Reuse pooled connections but don't leak cookies between requests
+            session = _get_session()
+            session.cookies.clear()
+            return session.get(url, headers=headers, timeout=timeout)
+
         try:
             # Use asyncio to run requests in a thread pool
-            response = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: requests.get(url, headers=headers, timeout=timeout)
-            )
+            response = await asyncio.to_thread(_fetch)
 
             if response.status_code != 200:
                 logger.warning(
@@ -395,8 +415,7 @@ class WebSearch(BaseTool):
         search_params: Dict[str, Any],
     ) -> List[SearchItem]:
         """Execute search with the given engine and parameters."""
-        return await asyncio.get_event_loop().run_in_executor(
-            None,
+        return await asyncio.to_thread(
             lambda: list(
                 engine.perform_search(
                     query,
@@ -404,7 +423,7 @@ class WebSearch(BaseTool):
                     lang=search_params.get("lang"),
                     country=search_params.get("country"),
                 )
-            ),
+            )
         )
 
 
