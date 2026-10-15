@@ -14,7 +14,7 @@ async def run_flow():
     try:
         prompt = input("Enter your prompt: ")
 
-        if prompt.strip().isspace() or not prompt:
+        if not prompt.strip():
             logger.warning("Empty prompt provided.")
             return
 

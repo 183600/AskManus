@@ -161,10 +161,11 @@ class DockerSession:
                 result_lines = []
                 command_sent = False
                 exit_echo_seen = False
+                exit_code_seen = False
                 idle_timeout = 0.1
 
                 def process(chunk: bytes) -> None:
-                    nonlocal buffer, command_sent, exit_echo_seen
+                    nonlocal buffer, command_sent, exit_echo_seen, exit_code_seen
                     buffer.extend(chunk)
                     lines = buffer.split(b"\n")
 
@@ -186,7 +187,18 @@ class DockerSession:
                             exit_echo_seen = True
                             continue
 
-                        if stripped.isdigit():
+                        # If the command output has no trailing newline, the
+                        # prompt and the echoed `echo $?` are glued to the
+                        # last output line; keep the line, but treat it as
+                        # the marker as well.
+                        if not exit_echo_seen and stripped.endswith(b"$ echo $?"):
+                            exit_echo_seen = True
+
+                        # Bare numbers are command output unless they arrive
+                        # right after the `echo $?` marker, whose output is
+                        # the exit code.
+                        if exit_echo_seen and stripped.isdigit():
+                            exit_code_seen = True
                             continue
 
                         if stripped:
@@ -200,12 +212,15 @@ class DockerSession:
 
                     done = False
                     while buffer.endswith(b"$ "):
-                        if exit_echo_seen:
+                        # The command is only finished once its exit code
+                        # has been observed. A bare prompt may be the
+                        # intermediate prompt printed before the echoed
+                        # `echo $?` line, so wait briefly for more output;
+                        # an idle stream ends the command as well, which
+                        # also covers programs that swallow that line.
+                        if exit_code_seen:
                             done = True
                             break
-                        # Intermediate prompt (some programs swallow the
-                        # `echo $?` line). Treat an idle stream as done,
-                        # matching the legacy polling behaviour.
                         try:
                             chunk = await asyncio.wait_for(
                                 loop.sock_recv(self.socket, 4096), idle_timeout
