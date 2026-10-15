@@ -108,8 +108,6 @@ class DockerSession:
 
             if self.exec_id:
                 try:
-                    # Wait (bounded) until the exec instance stops running
-                    # instead of sleeping a fixed amount of time.
                     loop = asyncio.get_running_loop()
                     deadline = loop.time() + 1.0
                     while loop.time() < deadline:
@@ -144,8 +142,6 @@ class DockerSession:
             chunk = await loop.sock_recv(self.socket, 4096)
             if not chunk:
                 break
-            # Only search the newly received bytes plus one byte of overlap,
-            # so repeated scans stay linear in the total output size.
             search_from = max(0, len(buffer) - (len(marker) - 1))
             buffer.extend(chunk)
             if buffer.find(marker, search_from) != -1:
@@ -191,8 +187,6 @@ class DockerSession:
                     nonlocal marker_pending
                     buffer.extend(chunk)
 
-                    # Consume only complete lines, scanning just the newly
-                    # received bytes instead of re-splitting the whole buffer.
                     start = 0
                     while True:
                         newline = buffer.find(b"\n", start)
@@ -206,12 +200,6 @@ class DockerSession:
                             command_sent = True
                             continue
 
-                        # The tty prints the prompt before echoing the
-                        # `echo $?` line, so the marker always appears as
-                        # `$ echo $?`. A line ending with the marker is either
-                        # the real marker or output that contains it, so hold
-                        # it until the next line decides: the real marker is
-                        # always followed by the exit code line.
                         if marker_pending is not None:
                             if stripped.isdigit() and not exit_code_seen:
                                 prefix = marker_pending[
@@ -222,7 +210,6 @@ class DockerSession:
                                 exit_echo_seen = True
                                 exit_code_seen = True
                                 continue
-                            # The held line was ordinary output.
                             result_lines.append(marker_pending)
                             marker_pending = None
 
@@ -256,9 +243,6 @@ class DockerSession:
                                 loop.sock_recv(self.socket, 4096), idle_timeout
                             )
                         except asyncio.TimeoutError:
-                            # Some programs consume the `echo $?` line (for
-                            # example apt reads stdin), so a prompt followed by
-                            # an idle stream marks the end of the command too.
                             done = True
                             break
                         if not chunk:
@@ -362,8 +346,6 @@ class AsyncDockerizedTerminal:
         """
         await self._ensure_workdir()
 
-        # Reuse the API client that owns this container when available so we
-        # don't open an additional connection pool for the session.
         container_client = getattr(self.container, "client", None)
         api = container_client.api if container_client is not None else None
         self.session = DockerSession(self.container.id, api)

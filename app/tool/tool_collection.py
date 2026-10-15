@@ -21,8 +21,6 @@ class ToolCollection:
         return iter(self.tools)
 
     def to_params(self) -> List[Dict[str, Any]]:
-        # Cache the serialized schemas until the underlying tool tuple changes
-        # (identity check also covers direct reassignment of ``self.tools``).
         if self._params_cache is None or self._params_cache_for is not self.tools:
             self._params_cache = [tool.to_param() for tool in self.tools]
             self._params_cache_for = self.tools

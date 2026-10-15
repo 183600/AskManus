@@ -109,7 +109,6 @@ class PythonExecute(BaseTool):
                     "observation": f"Execution timeout after {timeout} seconds",
                     "success": False,
                 }
-            # The result was already published; stop the lingering shutdown.
             proc.terminate()
             await asyncio.to_thread(proc.join, 1)
         else:

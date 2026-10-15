@@ -116,8 +116,7 @@ class DockerSandbox:
             # Start container
             await asyncio.to_thread(self.container.start)
 
-            # Initialize terminal, reusing the already resolved container
-            # object instead of forcing another Docker API lookup.
+            # Initialize terminal
             self.terminal = AsyncDockerizedTerminal(
                 self.container,
                 self.config.work_dir,
@@ -305,8 +304,6 @@ class DockerSandbox:
                 self.container.get_archive, resolved_src
             )
 
-            # Stream the archive straight to disk instead of buffering it
-            # in memory first; the blocking stream is consumed off-loop.
             await asyncio.to_thread(
                 self._extract_archive_stream, stream, src_path, dst_path
             )
@@ -389,8 +386,7 @@ class DockerSandbox:
                     # Add single file to tar
                     tar.add(src_path, arcname=os.path.basename(dst_path))
 
-            # Upload to container (pass the buffer directly to avoid an
-            # extra full copy of the archive bytes).
+            # Upload to container
             tar_buffer.seek(0)
             await asyncio.to_thread(
                 self.container.put_archive,
@@ -460,8 +456,6 @@ class DockerSandbox:
 
                 return file_content.read()
 
-        # The Docker stream performs blocking socket reads, so consume it
-        # in a worker thread to keep the event loop responsive.
         return await asyncio.to_thread(_read)
 
     async def cleanup(self) -> None:

@@ -178,8 +178,7 @@ class BaseAgent(BaseModel, ABC):
         if not last_content:
             return False
 
-        # Count identical content occurrences, stopping as soon as the
-        # duplicate threshold is reached instead of scanning all messages.
+        # Count identical content occurrences
         duplicate_count = 0
         for index in range(len(messages) - 2, -1, -1):
             msg = messages[index]

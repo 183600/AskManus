@@ -536,8 +536,6 @@ class LLM:
             if not full_response:
                 raise LLMEmptyResponseError("Empty response from streaming LLM")
 
-            # Record the estimated usage only after the request has succeeded
-            # so retries cannot inflate the cumulative token counters.
             completion_tokens = self.count_tokens(completion_text)
             logger.info(
                 f"Estimated completion tokens for streaming response: {completion_tokens}"
@@ -708,8 +706,6 @@ class LLM:
             if not full_response:
                 raise LLMEmptyResponseError("Empty response from streaming LLM")
 
-            # Record the estimated usage only after the request has succeeded
-            # so retries cannot inflate the cumulative token counters.
             self.update_token_count(input_tokens, self.count_tokens(full_response))
 
             return full_response
