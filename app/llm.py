@@ -2,8 +2,12 @@ import math
 from typing import Dict, List, Optional, Union
 
 import tiktoken
+from botocore.exceptions import BotoCoreError, ClientError
 from openai import (
+    APIConnectionError,
     APIError,
+    APIStatusError,
+    APITimeoutError,
     AsyncAzureOpenAI,
     AsyncOpenAI,
     AuthenticationError,
@@ -20,7 +24,7 @@ from tenacity import (
 
 from app.bedrock import BedrockClient
 from app.config import LLMSettings, config
-from app.exceptions import TokenLimitExceeded
+from app.exceptions import LLMEmptyResponseError, TokenLimitExceeded
 from app.logger import logger  # Assuming a logger is set up in your app
 from app.schema import (
     ROLE_VALUES,
@@ -31,11 +35,57 @@ from app.schema import (
 )
 
 
+# Transient HTTP statuses worth retrying: request timeout, conflict,
+# too early and rate limit. Server-side failures (>= 500) are handled too.
+RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429})
+
+# AWS Bedrock error codes that indicate transient service conditions.
+RETRYABLE_BEDROCK_ERROR_CODES = frozenset(
+    {
+        "InternalServerException",
+        "ModelTimeoutException",
+        "RequestTimeout",
+        "RequestTimeoutException",
+        "ServiceUnavailable",
+        "ServiceUnavailableException",
+        "Throttling",
+        "ThrottlingException",
+        "TooManyRequestsException",
+    }
+)
+
+
 def _is_retryable(exception: BaseException) -> bool:
-    """Retry transient failures but never retry TokenLimitExceeded."""
+    """Return True only for transient failures that are worth retrying.
+
+    Deterministic failures (authentication, permissions, invalid requests,
+    missing models, token limits, malformed input) are never retried: doing
+    so only delays the error report by minutes of exponential backoff.
+    Connection problems, timeouts, rate limits and server-side failures are
+    retried since they usually resolve on their own.
+    """
     if isinstance(exception, TokenLimitExceeded):
         return False
-    return isinstance(exception, Exception)
+    if isinstance(exception, LLMEmptyResponseError):
+        # Empty completions are usually a transient provider hiccup.
+        return True
+    if isinstance(exception, (APIConnectionError, APITimeoutError, TimeoutError)):
+        return True
+    if isinstance(exception, APIStatusError):
+        return (
+            exception.status_code in RETRYABLE_STATUS_CODES
+            or exception.status_code >= 500
+        )
+    if isinstance(exception, ClientError):
+        # AWS Bedrock errors: retry throttling and server-side failures only.
+        response = getattr(exception, "response", None) or {}
+        code = response.get("Error", {}).get("Code", "")
+        status = response.get("ResponseMetadata", {}).get("HTTPStatusCode", 0) or 0
+        return status >= 500 or code in RETRYABLE_BEDROCK_ERROR_CODES
+    if isinstance(exception, BotoCoreError):
+        # Network-level botocore failures (timeouts, DNS, closed streams...).
+        return True
+    return False
 
 
 REASONING_MODELS = ["o1", "o3-mini"]
@@ -388,7 +438,8 @@ class LLM:
     @retry(
         wait=wait_random_exponential(min=1, max=60),
         stop=stop_after_attempt(6),
-        retry=retry_if_exception(_is_retryable),  # Don't retry TokenLimitExceeded
+        retry=retry_if_exception(_is_retryable),  # Only transient failures
+        reraise=True,  # Surface the real error instead of tenacity.RetryError
     )
     async def ask(
         self,
@@ -455,18 +506,20 @@ class LLM:
                 )
 
                 if not response.choices or not response.choices[0].message.content:
-                    raise ValueError("Empty or invalid response from LLM")
+                    raise LLMEmptyResponseError("Empty or invalid response from LLM")
 
-                # Update token counts
-                self.update_token_count(
-                    response.usage.prompt_tokens, response.usage.completion_tokens
-                )
+                # Update token counts when the provider reports usage
+                usage = response.usage
+                if usage is not None:
+                    self.update_token_count(
+                        usage.prompt_tokens or 0, usage.completion_tokens or 0
+                    )
+                else:
+                    logger.debug("LLM response did not include token usage")
 
                 return response.choices[0].message.content
 
-            # Streaming request, For streaming, update estimated token count before making the request
-            self.update_token_count(input_tokens)
-
+            # Streaming request
             response = await self.client.chat.completions.create(**params, stream=True)
 
             collected_messages = []
@@ -481,19 +534,23 @@ class LLM:
             completion_text = "".join(collected_messages)
             full_response = completion_text.strip()
             if not full_response:
-                raise ValueError("Empty response from streaming LLM")
+                raise LLMEmptyResponseError("Empty response from streaming LLM")
 
-            # estimate completion tokens for streaming response
+            # Record the estimated usage only after the request has succeeded
+            # so retries cannot inflate the cumulative token counters.
             completion_tokens = self.count_tokens(completion_text)
             logger.info(
                 f"Estimated completion tokens for streaming response: {completion_tokens}"
             )
-            self.total_completion_tokens += completion_tokens
+            self.update_token_count(input_tokens, completion_tokens)
 
             return full_response
 
         except TokenLimitExceeded:
             # Re-raise token limit errors without logging
+            raise
+        except LLMEmptyResponseError:
+            logger.warning("LLM returned an empty response")
             raise
         except ValueError:
             logger.exception(f"Validation error")
@@ -514,7 +571,8 @@ class LLM:
     @retry(
         wait=wait_random_exponential(min=1, max=60),
         stop=stop_after_attempt(6),
-        retry=retry_if_exception(_is_retryable),  # Don't retry TokenLimitExceeded
+        retry=retry_if_exception(_is_retryable),  # Only transient failures
+        reraise=True,  # Surface the real error instead of tenacity.RetryError
     )
     async def ask_with_images(
         self,
@@ -624,13 +682,16 @@ class LLM:
                 response = await self.client.chat.completions.create(**params)
 
                 if not response.choices or not response.choices[0].message.content:
-                    raise ValueError("Empty or invalid response from LLM")
+                    raise LLMEmptyResponseError("Empty or invalid response from LLM")
 
-                self.update_token_count(response.usage.prompt_tokens)
+                usage = response.usage
+                if usage is not None:
+                    self.update_token_count(
+                        usage.prompt_tokens or 0, usage.completion_tokens or 0
+                    )
                 return response.choices[0].message.content
 
             # Handle streaming request
-            self.update_token_count(input_tokens)
             response = await self.client.chat.completions.create(**params)
 
             collected_messages = []
@@ -645,11 +706,18 @@ class LLM:
             full_response = "".join(collected_messages).strip()
 
             if not full_response:
-                raise ValueError("Empty response from streaming LLM")
+                raise LLMEmptyResponseError("Empty response from streaming LLM")
+
+            # Record the estimated usage only after the request has succeeded
+            # so retries cannot inflate the cumulative token counters.
+            self.update_token_count(input_tokens, self.count_tokens(full_response))
 
             return full_response
 
         except TokenLimitExceeded:
+            raise
+        except LLMEmptyResponseError:
+            logger.warning("LLM returned an empty response in ask_with_images")
             raise
         except ValueError as ve:
             logger.error(f"Validation error in ask_with_images: {ve}")
@@ -670,7 +738,8 @@ class LLM:
     @retry(
         wait=wait_random_exponential(min=1, max=60),
         stop=stop_after_attempt(6),
-        retry=retry_if_exception(_is_retryable),  # Don't retry TokenLimitExceeded
+        retry=retry_if_exception(_is_retryable),  # Only transient failures
+        reraise=True,  # Surface the real error instead of tenacity.RetryError
     )
     async def ask_tool(
         self,
@@ -770,10 +839,14 @@ class LLM:
                 # raise ValueError("Invalid or empty response from LLM")
                 return None
 
-            # Update token counts
-            self.update_token_count(
-                response.usage.prompt_tokens, response.usage.completion_tokens
-            )
+            # Update token counts when the provider reports usage
+            usage = response.usage
+            if usage is not None:
+                self.update_token_count(
+                    usage.prompt_tokens or 0, usage.completion_tokens or 0
+                )
+            else:
+                logger.debug("LLM response did not include token usage")
 
             return response.choices[0].message
 
