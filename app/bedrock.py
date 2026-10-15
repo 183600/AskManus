@@ -3,9 +3,20 @@ import sys
 import time
 import uuid
 from datetime import datetime
+from functools import lru_cache
 from typing import Dict, List, Literal, Optional
 
 import boto3
+
+
+@lru_cache(maxsize=256)
+def _parse_tool_arguments(arguments: str):
+    """Parse OpenAI tool-call arguments.
+
+    Every request replays the full conversation, so the same argument
+    strings are decoded over and over; memoizing avoids repeated parsing.
+    """
+    return json.loads(arguments)
 
 
 # Global variables to track the current tool use ID across function calls
@@ -106,7 +117,7 @@ class ChatCompletions:
                     bedrock_tool_use = {
                         "toolUseId": openai_tool_calls[0]["id"],
                         "name": openai_tool_calls[0]["function"]["name"],
-                        "input": json.loads(
+                        "input": _parse_tool_arguments(
                             openai_tool_calls[0]["function"]["arguments"]
                         ),
                     }

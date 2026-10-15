@@ -55,7 +55,13 @@ class SandboxManager:
         self._global_lock = asyncio.Lock()
         self._active_operations: Set[str] = set()
 
+        # Slots reserved by in-flight create_sandbox() calls, so concurrent
+        # creations still respect max_sandboxes without serializing the slow
+        # Docker container startup on the global lock.
+        self._pending_creates = 0
+
         self._available_images: Set[str] = set()
+        self._image_locks: Dict[str, asyncio.Lock] = {}
 
         # Cleanup task
         self._cleanup_task: Optional[asyncio.Task] = None
@@ -76,19 +82,26 @@ class SandboxManager:
         if image in self._available_images:
             return True
 
-        try:
-            await asyncio.to_thread(self._client.images.get, image)
-            self._available_images.add(image)
-            return True
-        except ImageNotFound:
+        # Serialize work per image so concurrent callers never pull the same
+        # image twice; different images are still processed in parallel.
+        lock = self._image_locks.setdefault(image, asyncio.Lock())
+        async with lock:
+            if image in self._available_images:
+                return True
+
             try:
-                logger.info(f"Pulling image {image}...")
-                await asyncio.to_thread(self._client.images.pull, image)
+                await asyncio.to_thread(self._client.images.get, image)
                 self._available_images.add(image)
                 return True
-            except (APIError, Exception) as e:
-                logger.error(f"Failed to pull image {image}: {e}")
-                return False
+            except ImageNotFound:
+                try:
+                    logger.info(f"Pulling image {image}...")
+                    await asyncio.to_thread(self._client.images.pull, image)
+                    self._available_images.add(image)
+                    return True
+                except (APIError, Exception) as e:
+                    logger.error(f"Failed to pull image {image}: {e}")
+                    return False
 
     @asynccontextmanager
     async def sandbox_operation(self, sandbox_id: str):
@@ -133,13 +146,18 @@ class SandboxManager:
         Raises:
             RuntimeError: If max sandbox count reached or creation fails.
         """
+        config = config or SandboxSettings()
+
+        # Reserve a slot before running the slow Docker operations so that
+        # parallel creations still honour max_sandboxes.
         async with self._global_lock:
-            if len(self._sandboxes) >= self.max_sandboxes:
+            if len(self._sandboxes) + self._pending_creates >= self.max_sandboxes:
                 raise RuntimeError(
                     f"Maximum number of sandboxes ({self.max_sandboxes}) reached"
                 )
+            self._pending_creates += 1
 
-            config = config or SandboxSettings()
+        try:
             if not await self.ensure_image(config.image):
                 raise RuntimeError(f"Failed to ensure Docker image: {config.image}")
 
@@ -147,19 +165,22 @@ class SandboxManager:
             try:
                 sandbox = DockerSandbox(config, volume_bindings)
                 await sandbox.create()
+            except Exception as e:
+                logger.error(f"Failed to create sandbox: {e}")
+                raise RuntimeError(f"Failed to create sandbox: {e}")
 
+            async with self._global_lock:
                 self._sandboxes[sandbox_id] = sandbox
                 self._last_used[sandbox_id] = asyncio.get_running_loop().time()
                 self._locks[sandbox_id] = asyncio.Lock()
 
-                logger.info(f"Created sandbox {sandbox_id}")
-                return sandbox_id
-
-            except Exception as e:
-                logger.error(f"Failed to create sandbox: {e}")
-                if sandbox_id in self._sandboxes:
-                    await self.delete_sandbox(sandbox_id)
-                raise RuntimeError(f"Failed to create sandbox: {e}")
+            logger.info(f"Created sandbox {sandbox_id}")
+            return sandbox_id
+        finally:
+            # Guarded so a concurrent cleanup() resetting the counter cannot
+            # drive it negative.
+            if self._pending_creates > 0:
+                self._pending_creates -= 1
 
     async def get_sandbox(self, sandbox_id: str) -> DockerSandbox:
         """Gets a sandbox instance.
@@ -245,6 +266,7 @@ class SandboxManager:
         self._last_used.clear()
         self._locks.clear()
         self._active_operations.clear()
+        self._pending_creates = 0
 
         logger.info("Manager cleanup completed")
 
@@ -255,15 +277,20 @@ class SandboxManager:
             sandbox_id: Sandbox ID to delete.
         """
         try:
-            if sandbox_id in self._active_operations:
-                logger.warning(
-                    f"Sandbox {sandbox_id} has active operations, waiting for completion"
-                )
-                for _ in range(10):  # Wait at most 10 times
-                    await asyncio.sleep(0.5)
-                    if sandbox_id not in self._active_operations:
-                        break
-                else:
+            # Wait until in-flight operations on this sandbox finish instead of
+            # polling the active set every 0.5 seconds. The per-sandbox lock is
+            # held for the duration of every operation, so acquiring it means
+            # the sandbox is idle (or the bounded wait timed out).
+            lock = self._locks.get(sandbox_id)
+            if lock is not None:
+                if sandbox_id in self._active_operations:
+                    logger.warning(
+                        f"Sandbox {sandbox_id} has active operations, waiting for completion"
+                    )
+                try:
+                    await asyncio.wait_for(lock.acquire(), timeout=5.0)
+                    lock.release()
+                except asyncio.TimeoutError:
                     logger.warning(
                         f"Timeout waiting for sandbox {sandbox_id} operations to complete"
                     )

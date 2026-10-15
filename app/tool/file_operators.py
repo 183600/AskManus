@@ -47,9 +47,7 @@ class LocalFileOperator(FileOperator):
     async def read_file(self, path: PathLike) -> str:
         """Read content from a local file."""
         try:
-            return await asyncio.to_thread(
-                Path(path).read_text, encoding=self.encoding
-            )
+            return await asyncio.to_thread(Path(path).read_text, encoding=self.encoding)
         except Exception as e:
             raise ToolError(f"Failed to read {path}: {str(e)}") from None
 
@@ -102,11 +100,25 @@ class SandboxFileOperator(FileOperator):
 
     def __init__(self):
         self.sandbox_client = SANDBOX_CLIENT
+        self._init_lock: Optional[asyncio.Lock] = None
+        self._init_lock_loop = None
 
     async def _ensure_sandbox_initialized(self):
         """Ensure sandbox is initialized."""
-        if not self.sandbox_client.sandbox:
-            await self.sandbox_client.create(config=SandboxSettings())
+        if self.sandbox_client.sandbox:
+            return
+
+        # Serialize initialization so concurrent callers cannot each spin up
+        # (and leak) their own container. The lock is re-created per event
+        # loop so this long-lived operator stays usable across asyncio.run().
+        loop = asyncio.get_running_loop()
+        if self._init_lock is None or self._init_lock_loop is not loop:
+            self._init_lock = asyncio.Lock()
+            self._init_lock_loop = loop
+
+        async with self._init_lock:
+            if not self.sandbox_client.sandbox:
+                await self.sandbox_client.create(config=SandboxSettings())
 
     async def read_file(self, path: PathLike) -> str:
         """Read content from a file in sandbox."""

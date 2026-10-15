@@ -78,6 +78,7 @@ class _BashSession:
         await self._process.stdin.drain()
 
         # read output from the process, until the sentinel is found
+        sentinel_bytes = self._sentinel.encode()
         try:
             async with asyncio.timeout(self._timeout):
                 delay = 0.01
@@ -86,12 +87,17 @@ class _BashSession:
                     delay = min(delay * 2, self._output_delay)
                     # if we read directly from stdout/stderr, it will wait forever for
                     # EOF. use the StreamReader buffer directly instead.
-                    output = self._process.stdout._buffer.decode(
-                        errors="replace"
+                    buffer = (
+                        self._process.stdout._buffer
                     )  # pyright: ignore[reportAttributeAccessIssue]
-                    if self._sentinel in output:
+                    # Scan the raw bytes; decoding the (possibly large) buffer on
+                    # every poll would repeatedly copy the whole accumulated output.
+                    sentinel_at = buffer.find(sentinel_bytes)
+                    if sentinel_at != -1:
                         # strip the sentinel and break
-                        output = output[: output.index(self._sentinel)]
+                        output = bytes(memoryview(buffer)[:sentinel_at]).decode(
+                            errors="replace"
+                        )
                         break
         except asyncio.TimeoutError:
             self._timed_out = True

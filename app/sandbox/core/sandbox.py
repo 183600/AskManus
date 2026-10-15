@@ -21,26 +21,55 @@ class _ChunkStreamReader:
 
     ``tarfile`` in streaming mode only needs ``read``, which allows Docker
     archives to be unpacked without buffering the whole archive in memory.
+    Consumed bytes are tracked with an offset so that small reads (tarfile
+    reads in 512-byte blocks) do not repeatedly copy the buffered tail.
     """
 
-    __slots__ = ("_chunks", "_buffer")
+    __slots__ = ("_chunks", "_buffer", "_offset", "_eof")
+
+    # Only compact the buffer once a meaningful prefix was consumed;
+    # this bounds both memory and the number of memmoves to O(n) overall.
+    _COMPACT_MIN = 1 << 16
 
     def __init__(self, chunks) -> None:
         self._chunks = iter(chunks)
-        self._buffer = b""
+        self._buffer = bytearray()
+        self._offset = 0
+        self._eof = False
+
+    def _fill(self, target: int) -> None:
+        buffer = self._buffer
+        while len(buffer) < target and not self._eof:
+            try:
+                buffer.extend(next(self._chunks))
+            except StopIteration:
+                self._eof = True
 
     def read(self, size: int = -1) -> bytes:
         if size is None or size < 0:
-            self._buffer += b"".join(self._chunks)
-            data, self._buffer = self._buffer, b""
+            if not self._eof:
+                buffer = self._buffer
+                for chunk in self._chunks:
+                    buffer.extend(chunk)
+                self._eof = True
+            data = bytes(memoryview(self._buffer)[self._offset :])
+            self._buffer.clear()
+            self._offset = 0
             return data
-        while len(self._buffer) < size:
-            try:
-                self._buffer += next(self._chunks)
-            except StopIteration:
-                break
-        data = self._buffer[:size]
-        self._buffer = self._buffer[size:]
+
+        self._fill(self._offset + size)
+        end = min(self._offset + size, len(self._buffer))
+        data = bytes(memoryview(self._buffer)[self._offset : end])
+        self._offset = end
+
+        if self._offset >= len(self._buffer):
+            self._buffer.clear()
+            self._offset = 0
+        elif self._offset >= self._COMPACT_MIN and self._offset * 2 >= len(
+            self._buffer
+        ):
+            del self._buffer[: self._offset]
+            self._offset = 0
         return data
 
 
@@ -111,7 +140,9 @@ class DockerSandbox:
                 detach=True,
             )
 
-            self.container = self.client.containers.get(container["Id"])
+            self.container = await asyncio.to_thread(
+                self.client.containers.get, container["Id"]
+            )
 
             # Start container
             await asyncio.to_thread(self.container.start)
@@ -443,9 +474,7 @@ class DockerSandbox:
         """
 
         def _read() -> bytes:
-            with tarfile.open(
-                fileobj=_ChunkStreamReader(tar_stream), mode="r|"
-            ) as tar:
+            with tarfile.open(fileobj=_ChunkStreamReader(tar_stream), mode="r|") as tar:
                 member = tar.next()
                 if not member:
                     raise RuntimeError("Empty tar archive")
