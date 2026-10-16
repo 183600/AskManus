@@ -507,10 +507,57 @@ class DockerSandbox:
 
         return await asyncio.to_thread(_read)
 
+    async def _clear_work_dir(self) -> None:
+        """Removes sandbox-created files before the container goes away.
+
+        Files created inside the container are owned by ``root``, so the host
+        process cannot delete them directly. Removing them from inside the
+        container first keeps :meth:`cleanup` from leaking the host work dir.
+        Bind-mounted custom volumes are left untouched.
+        """
+        container = self.container
+        if container is None or not self._host_work_dir:
+            return
+
+        try:
+            names = await asyncio.to_thread(os.listdir, self._host_work_dir)
+        except OSError:
+            return
+        if not names:
+            return
+
+        work_dir = self.config.work_dir.rstrip("/") or "/"
+        protected = set()
+        for container_path in self.volume_bindings.values():
+            if not container_path:
+                continue
+            normalized = os.path.normpath(container_path)
+            if normalized == work_dir or normalized.startswith(work_dir + "/"):
+                relative = normalized[len(work_dir) :].lstrip("/")
+                if relative:
+                    protected.add(relative.split("/", 1)[0])
+
+        targets = [f"{work_dir}/{name}" for name in names if name not in protected]
+        if not targets:
+            return
+
+        try:
+            await asyncio.to_thread(
+                container.exec_run, ["rm", "-rf", "--", *targets], user="root"
+            )
+        except Exception as e:
+            logger.debug(f"Failed to clear sandbox work dir: {e}")
+
     async def cleanup(self) -> None:
         """Cleans up sandbox resources."""
         errors = []
         try:
+            if self.container and self._host_work_dir:
+                try:
+                    await self._clear_work_dir()
+                except Exception as e:
+                    errors.append(f"Work dir cleanup error: {e}")
+
             if self.terminal:
                 try:
                     await self.terminal.close()

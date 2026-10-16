@@ -7,6 +7,7 @@ allowing interactive command execution with timeout control.
 
 import asyncio
 import socket
+import uuid
 from typing import Dict, Optional, Tuple, Union
 
 import docker
@@ -28,6 +29,10 @@ class DockerSession:
         self.container_id = container_id
         self.exec_id = None
         self.socket = None
+        # Random prompt marker so command output can never be mistaken for
+        # the shell prompt when waiting for a command to finish.
+        self.prompt = f"[{uuid.uuid4().hex[:12]}]$ "
+        self._prompt_bytes = self.prompt.encode()
 
     async def create(self, working_dir: str, env_vars: Dict[str, str]) -> None:
         """Creates an interactive session with the container.
@@ -44,7 +49,7 @@ class DockerSession:
             "-c",
             f"cd {working_dir} && "
             "PROMPT_COMMAND='' "
-            "PS1='$ ' "
+            f"PS1='{self.prompt}' "
             "exec bash --norc --noprofile",
         ]
 
@@ -58,7 +63,12 @@ class DockerSession:
             stderr=True,
             privileged=True,
             user="root",
-            environment={**env_vars, "TERM": "dumb", "PS1": "$ ", "PROMPT_COMMAND": ""},
+            environment={
+                **env_vars,
+                "TERM": "dumb",
+                "PS1": self.prompt,
+                "PROMPT_COMMAND": "",
+            },
         )
         self.exec_id = exec_data["Id"]
 
@@ -135,7 +145,7 @@ class DockerSession:
             socket.error: If socket communication fails.
         """
         loop = asyncio.get_running_loop()
-        marker = b"$ "
+        marker = self._prompt_bytes
         buffer = bytearray()
         while True:
             chunk = await loop.sock_recv(self.socket, 4096)
@@ -171,6 +181,9 @@ class DockerSession:
             loop = asyncio.get_running_loop()
             await loop.sock_sendall(self.socket, full_command.encode())
 
+            # The echoed second line is the prompt followed by "echo $?".
+            echo_marker = self._prompt_bytes + b"echo $?"
+
             async def read_output() -> str:
                 buffer = bytearray()
                 result_lines = []
@@ -184,7 +197,7 @@ class DockerSession:
                     nonlocal pending_marker, pending_exit, exit_code_seen
                     if pending_marker is not None:
                         prefix = pending_marker[
-                            : pending_marker.rfind(b"$ echo $?")
+                            : pending_marker.rfind(echo_marker)
                         ].rstrip(b"\r")
                         if prefix.strip():
                             result_lines.append(prefix)
@@ -230,7 +243,7 @@ class DockerSession:
                             result_lines.append(pending_marker)
                             pending_marker = None
 
-                        if stripped.endswith(b"$ echo $?"):
+                        if stripped.endswith(echo_marker):
                             pending_marker = line
                             continue
 
@@ -247,7 +260,7 @@ class DockerSession:
                     process(chunk)
 
                     done = False
-                    while buffer.endswith(b"$ "):
+                    while buffer.endswith(self._prompt_bytes):
                         if exit_code_seen:
                             done = True
                             break
