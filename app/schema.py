@@ -171,12 +171,7 @@ class Memory(BaseModel):
         self._trim_to_limit()
 
     def _trim_to_limit(self) -> None:
-        """Drop the oldest messages once ``max_messages`` is exceeded.
-
-        The cut point is moved forward past any tool results so the retained
-        window never starts with a tool message whose originating assistant
-        tool call was dropped; providers reject such histories.
-        """
+        """Drop the oldest messages once ``max_messages`` is exceeded."""
         overflow = len(self.messages) - self.max_messages
         if overflow <= 0:
             return

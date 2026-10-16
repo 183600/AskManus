@@ -11,11 +11,7 @@ import boto3
 
 @lru_cache(maxsize=256)
 def _parse_tool_arguments(arguments: str):
-    """Parse OpenAI tool-call arguments.
-
-    Every request replays the full conversation, so the same argument
-    strings are decoded over and over; memoizing avoids repeated parsing.
-    """
+    """Parse OpenAI tool-call arguments."""
     return json.loads(arguments)
 
 

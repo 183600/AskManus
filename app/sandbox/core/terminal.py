@@ -344,7 +344,7 @@ class AsyncDockerizedTerminal:
 
     @property
     def client(self) -> docker.DockerClient:
-        """Docker client, created lazily only when it is actually needed."""
+        """Docker client."""
         if self._client is None:
             self._client = docker.from_env()
         return self._client

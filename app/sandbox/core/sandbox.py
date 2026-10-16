@@ -22,14 +22,10 @@ class _ChunkStreamReader:
 
     ``tarfile`` in streaming mode only needs ``read``, which allows Docker
     archives to be unpacked without buffering the whole archive in memory.
-    Consumed bytes are tracked with an offset so that small reads (tarfile
-    reads in 512-byte blocks) do not repeatedly copy the buffered tail.
     """
 
     __slots__ = ("_chunks", "_buffer", "_offset", "_eof")
 
-    # Only compact the buffer once a meaningful prefix was consumed;
-    # this bounds both memory and the number of memmoves to O(n) overall.
     _COMPACT_MIN = 1 << 16
 
     def __init__(self, chunks) -> None:

@@ -108,9 +108,6 @@ class SandboxFileOperator(FileOperator):
         if self.sandbox_client.sandbox:
             return
 
-        # Serialize initialization so concurrent callers cannot each spin up
-        # (and leak) their own container. The lock is re-created per event
-        # loop so this long-lived operator stays usable across asyncio.run().
         loop = asyncio.get_running_loop()
         if self._init_lock is None or self._init_lock_loop is not loop:
             self._init_lock = asyncio.Lock()

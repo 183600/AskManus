@@ -55,9 +55,6 @@ class SandboxManager:
         self._global_lock = asyncio.Lock()
         self._active_operations: Set[str] = set()
 
-        # Slots reserved by in-flight create_sandbox() calls, so concurrent
-        # creations still respect max_sandboxes without serializing the slow
-        # Docker container startup on the global lock.
         self._pending_creates = 0
 
         self._available_images: Set[str] = set()
@@ -82,8 +79,6 @@ class SandboxManager:
         if image in self._available_images:
             return True
 
-        # Serialize work per image so concurrent callers never pull the same
-        # image twice; different images are still processed in parallel.
         lock = self._image_locks.setdefault(image, asyncio.Lock())
         async with lock:
             if image in self._available_images:
@@ -148,8 +143,6 @@ class SandboxManager:
         """
         config = config or SandboxSettings()
 
-        # Reserve a slot before running the slow Docker operations so that
-        # parallel creations still honour max_sandboxes.
         async with self._global_lock:
             if len(self._sandboxes) + self._pending_creates >= self.max_sandboxes:
                 raise RuntimeError(
@@ -178,8 +171,6 @@ class SandboxManager:
             logger.info(f"Created sandbox {sandbox_id}")
             return sandbox_id
         finally:
-            # Guarded so a concurrent cleanup() resetting the counter cannot
-            # drive it negative.
             if self._pending_creates > 0:
                 self._pending_creates -= 1
 
@@ -278,10 +269,6 @@ class SandboxManager:
             sandbox_id: Sandbox ID to delete.
         """
         try:
-            # Wait until in-flight operations on this sandbox finish instead of
-            # polling the active set every 0.5 seconds. The per-sandbox lock is
-            # held for the duration of every operation, so acquiring it means
-            # the sandbox is idle (or the bounded wait timed out).
             lock = self._locks.get(sandbox_id)
             if lock is not None:
                 if sandbox_id in self._active_operations:

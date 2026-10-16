@@ -76,7 +76,7 @@ class ResearchInsight(BaseModel):
     @field_validator("relevance_score", mode="before")
     @classmethod
     def _coerce_relevance_score(cls, value):
-        """Clamp LLM-provided scores instead of failing on odd values."""
+        """Clamp LLM-provided scores to the valid range."""
         try:
             score = float(value)
         except (TypeError, ValueError):

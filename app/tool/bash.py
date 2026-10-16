@@ -90,8 +90,6 @@ class _BashSession:
                     buffer = (
                         self._process.stdout._buffer
                     )  # pyright: ignore[reportAttributeAccessIssue]
-                    # Scan the raw bytes; decoding the (possibly large) buffer on
-                    # every poll would repeatedly copy the whole accumulated output.
                     sentinel_at = buffer.find(sentinel_bytes)
                     if sentinel_at != -1:
                         # strip the sentinel and break
