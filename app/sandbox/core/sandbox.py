@@ -12,6 +12,7 @@ from docker.errors import NotFound
 from docker.models.containers import Container
 
 from app.config import SandboxSettings
+from app.logger import logger
 from app.sandbox.core.exceptions import SandboxTimeoutError
 from app.sandbox.core.terminal import AsyncDockerizedTerminal
 
@@ -127,10 +128,16 @@ class DockerSandbox:
             # Generate unique container name with sandbox_ prefix
             container_name = f"sandbox_{uuid.uuid4().hex[:8]}"
 
+            image = self.config.resolve_image()
+            if image != self.config.image:
+                logger.info(
+                    f"Sandbox image pinned to {image} (requested {self.config.image})"
+                )
+
             # Create container
             container = await asyncio.to_thread(
                 self.client.api.create_container,
-                image=self.config.image,
+                image=image,
                 command="tail -f /dev/null",
                 hostname="sandbox",
                 working_dir=self.config.work_dir,

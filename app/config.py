@@ -1,3 +1,4 @@
+import re
 import threading
 import tomllib
 from pathlib import Path
@@ -84,11 +85,20 @@ class BrowserSettings(BaseModel):
     )
 
 
+_PYTHON_IMAGE_PATTERN = re.compile(
+    r"^python:(?P<version>\d+(?:\.\d+){0,2})(?P<variant>-[A-Za-z0-9][A-Za-z0-9._-]*)?$"
+)
+
+
 class SandboxSettings(BaseModel):
     """Configuration for the execution sandbox"""
 
     use_sandbox: bool = Field(False, description="Whether to use the sandbox")
-    image: str = Field("python:3.12-slim", description="Base image")
+    image: str = Field("python:3.10-slim", description="Base image")
+    python_version: str = Field(
+        "3.10",
+        description="Python runtime used for official python base images",
+    )
     work_dir: str = Field("/workspace", description="Container working directory")
     memory_limit: str = Field("512m", description="Memory limit")
     cpu_limit: float = Field(1.0, description="CPU limit")
@@ -96,6 +106,25 @@ class SandboxSettings(BaseModel):
     network_enabled: bool = Field(
         False, description="Whether network access is allowed"
     )
+
+    def resolve_image(self) -> str:
+        """Resolves the effective Docker image for the sandbox.
+
+        Official ``python`` images are pinned to ``python_version`` while
+        keeping the requested tag variant (e.g. ``slim``, ``alpine``), so
+        sandboxed commands always run a known Python runtime no matter which
+        version appears in the image tag. Any other image reference (custom
+        images, registries, non-Python images) is returned unchanged.
+
+        Returns:
+            str: Docker image reference to run the sandbox with.
+        """
+        match = _PYTHON_IMAGE_PATTERN.match(self.image)
+        if not match:
+            return self.image
+
+        variant = match.group("variant") or ""
+        return f"python:{self.python_version}{variant}"
 
 
 class MCPSettings(BaseModel):

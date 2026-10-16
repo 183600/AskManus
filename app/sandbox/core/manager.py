@@ -158,8 +158,9 @@ class SandboxManager:
             self._pending_creates += 1
 
         try:
-            if not await self.ensure_image(config.image):
-                raise RuntimeError(f"Failed to ensure Docker image: {config.image}")
+            image = config.resolve_image()
+            if not await self.ensure_image(image):
+                raise RuntimeError(f"Failed to ensure Docker image: {image}")
 
             sandbox_id = str(uuid.uuid4())
             try:
