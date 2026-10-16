@@ -364,8 +364,6 @@ class DeepResearch(BaseTool):
         deadline: float,
     ) -> List[ResearchInsight]:
         """Extract insights from search results."""
-        # Select the results worth analyzing first, so the same URL can never
-        # be scheduled twice and the visited set is updated exactly once.
         pending: List[SearchResult] = []
         for rst in results:
             # Skip if URL already visited or time exceeded
@@ -383,8 +381,6 @@ class DeepResearch(BaseTool):
         if not pending:
             return []
 
-        # Analyze every page concurrently; each analysis is an independent
-        # LLM call, so running them sequentially wastes most of the cycle.
         analyses = await asyncio.gather(
             *(
                 self._analyze_content(
@@ -398,7 +394,6 @@ class DeepResearch(BaseTool):
             return_exceptions=True,
         )
 
-        # Merge in the original result order to keep insight ordering stable.
         all_insights: List[ResearchInsight] = []
         for rst, insights in zip(pending, analyses):
             if isinstance(insights, BaseException):

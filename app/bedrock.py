@@ -215,8 +215,6 @@ class ChatCompletions:
             system_prompt,
             bedrock_messages,
         ) = self._convert_openai_messages_to_bedrock_format(messages)
-        # boto3 is synchronous; run the blocking network call in a worker
-        # thread so the event loop keeps serving other coroutines.
         response = await asyncio.to_thread(
             self.client.converse,
             modelId=model,
@@ -243,8 +241,6 @@ class ChatCompletions:
             system_prompt,
             bedrock_messages,
         ) = self._convert_openai_messages_to_bedrock_format(messages)
-        # boto3's streaming API is synchronous; consuming it in a worker
-        # thread keeps the event loop responsive while the model streams.
         return await asyncio.to_thread(
             self._consume_bedrock_stream,
             model,
@@ -279,9 +275,6 @@ class ChatCompletions:
             "usage": {},
             "metrics": {},
         }
-        # Accumulate streamed fragments in lists and join once: repeated
-        # ``str +=`` on a growing response is quadratic in the number of
-        # chunks emitted by the provider.
         text_parts: List[str] = []
         tool_input_parts: List[str] = []
 

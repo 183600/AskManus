@@ -279,8 +279,7 @@ class DockerSandbox:
             resolved_path = self._safe_resolve_path(path)
             parent_dir = os.path.dirname(resolved_path)
 
-            # Create parent directory. ``mkdir -p`` is idempotent, so only the
-            # first write into a given directory needs the extra round-trip.
+            # Create parent directory
             if parent_dir and parent_dir not in self._created_dirs:
                 await self.run_command(f"mkdir -p {shlex.quote(parent_dir)}")
                 self._created_dirs.add(parent_dir)
@@ -296,8 +295,6 @@ class DockerSandbox:
                     self.container.put_archive, parent_dir or "/", tar_stream
                 )
             except Exception:
-                # Parent may have been removed outside of this helper; recreate
-                # it once and retry so the idempotent mkdir semantics are kept.
                 if parent_dir:
                     await self.run_command(f"mkdir -p {shlex.quote(parent_dir)}")
                     self._created_dirs.add(parent_dir)
@@ -508,13 +505,7 @@ class DockerSandbox:
         return await asyncio.to_thread(_read)
 
     async def _clear_work_dir(self) -> None:
-        """Removes sandbox-created files before the container goes away.
-
-        Files created inside the container are owned by ``root``, so the host
-        process cannot delete them directly. Removing them from inside the
-        container first keeps :meth:`cleanup` from leaking the host work dir.
-        Bind-mounted custom volumes are left untouched.
-        """
+        """Removes sandbox-created files before the container goes away."""
         container = self.container
         if container is None or not self._host_work_dir:
             return

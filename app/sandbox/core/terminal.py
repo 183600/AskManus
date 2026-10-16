@@ -29,8 +29,6 @@ class DockerSession:
         self.container_id = container_id
         self.exec_id = None
         self.socket = None
-        # Random prompt marker so command output can never be mistaken for
-        # the shell prompt when waiting for a command to finish.
         self.prompt = f"[{uuid.uuid4().hex[:12]}]$ "
         self._prompt_bytes = self.prompt.encode()
 
@@ -181,7 +179,6 @@ class DockerSession:
             loop = asyncio.get_running_loop()
             await loop.sock_sendall(self.socket, full_command.encode())
 
-            # The echoed second line is the prompt followed by "echo $?".
             echo_marker = self._prompt_bytes + b"echo $?"
 
             async def read_output() -> str:

@@ -170,27 +170,13 @@ class BaseAgent(BaseModel, ABC):
         stuck_prompt = "\
         Observed duplicate responses. Consider new strategies and avoid repeating ineffective paths already attempted."
         if not self.next_step_prompt:
-            # Avoid turning a missing prompt into the literal string "None".
             self.next_step_prompt = stuck_prompt
         elif stuck_prompt not in self.next_step_prompt:
-            # Keep the hint idempotent so repeated detections do not stack
-            # identical copies of the prompt on every step.
             self.next_step_prompt = f"{stuck_prompt}\n{self.next_step_prompt}"
         logger.warning(f"Agent detected stuck state. Added prompt: {stuck_prompt}")
 
     def is_stuck(self) -> bool:
-        """Check if the agent is stuck in a loop.
-
-        Two independent signals are used:
-
-        1. The same assistant response is produced over and over.
-        2. The same tool calls return the exact same results over and over
-           (e.g. a command that keeps failing with the same error), which
-           means the agent keeps acting without making progress.
-
-        The second signal matters most for tool-calling agents, whose
-        assistant messages usually carry no text at all.
-        """
+        """Check if the agent is stuck in a loop."""
         if len(self.memory.messages) < 2:
             return False
 
@@ -216,20 +202,9 @@ class BaseAgent(BaseModel, ABC):
         return False
 
     def _has_repeated_tool_cycles(self) -> bool:
-        """Detect identical tool calls that keep returning identical results.
-
-        Each "cycle" is one assistant message carrying tool calls plus the
-        tool messages that answer it. Two cycles are considered identical
-        only when both the calls (tool name + canonical arguments) and their
-        results match exactly. Tools that keep producing fresh output (for
-        example browser scrolling or time-dependent commands) therefore do
-        not trigger this signal.
-        """
+        """Detect identical tool calls that keep returning identical results."""
         messages = self.memory.messages
 
-        # Only inspect the sequence ending in a tool result: that is the
-        # cycle the agent just executed. Once the agent moves on to a plain
-        # assistant reply, past repetition is no longer actionable.
         if messages[-1].role != "tool":
             return False
 

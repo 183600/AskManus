@@ -331,7 +331,7 @@ class PlanningTool(BaseTool):
         output = f"Plan: {plan['title']} (ID: {plan['plan_id']})\n"
         output += "=" * len(output) + "\n\n"
 
-        # Calculate progress statistics in a single pass
+        # Calculate progress statistics
         total_steps = len(plan["steps"])
         status_counts = {
             "completed": 0,
