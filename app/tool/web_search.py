@@ -364,7 +364,7 @@ class WebSearch(BaseTool):
             (
                 result
                 if isinstance(result, SearchResult)
-                else SearchResult(**result.dict())
+                else SearchResult(**result.model_dump())
             )
             for result in fetched_results
         ]

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import sys
 import time
@@ -214,7 +215,10 @@ class ChatCompletions:
             system_prompt,
             bedrock_messages,
         ) = self._convert_openai_messages_to_bedrock_format(messages)
-        response = self.client.converse(
+        # boto3 is synchronous; run the blocking network call in a worker
+        # thread so the event loop keeps serving other coroutines.
+        response = await asyncio.to_thread(
+            self.client.converse,
             modelId=model,
             system=system_prompt,
             messages=bedrock_messages,
@@ -239,6 +243,27 @@ class ChatCompletions:
             system_prompt,
             bedrock_messages,
         ) = self._convert_openai_messages_to_bedrock_format(messages)
+        # boto3's streaming API is synchronous; consuming it in a worker
+        # thread keeps the event loop responsive while the model streams.
+        return await asyncio.to_thread(
+            self._consume_bedrock_stream,
+            model,
+            system_prompt,
+            bedrock_messages,
+            max_tokens,
+            temperature,
+            tools,
+        )
+
+    def _consume_bedrock_stream(
+        self,
+        model: str,
+        system_prompt: List[Dict[str, str]],
+        bedrock_messages: List[Dict[str, str]],
+        max_tokens: int,
+        temperature: float,
+        tools: Optional[List[dict]],
+    ) -> OpenAIResponse:
         response = self.client.converse_stream(
             modelId=model,
             system=system_prompt,
@@ -254,8 +279,11 @@ class ChatCompletions:
             "usage": {},
             "metrics": {},
         }
-        bedrock_response_text = ""
-        bedrock_response_tool_input = ""
+        # Accumulate streamed fragments in lists and join once: repeated
+        # ``str +=`` on a growing response is quadratic in the number of
+        # chunks emitted by the provider.
+        text_parts: List[str] = []
+        tool_input_parts: List[str] = []
 
         # Process streaming response
         stream = response.get("stream")
@@ -265,14 +293,13 @@ class ChatCompletions:
                     bedrock_response["output"]["message"]["role"] = event[
                         "messageStart"
                     ]["role"]
-                if event.get("contentBlockDelta", {}).get("delta", {}).get("text"):
-                    bedrock_response_text += event["contentBlockDelta"]["delta"]["text"]
-                    print(
-                        event["contentBlockDelta"]["delta"]["text"], end="", flush=True
-                    )
+                delta = event.get("contentBlockDelta", {}).get("delta", {})
+                if delta.get("text"):
+                    text_parts.append(delta["text"])
+                    print(delta["text"], end="", flush=True)
                 if event.get("contentBlockStop", {}).get("contentBlockIndex") == 0:
                     bedrock_response["output"]["message"]["content"].append(
-                        {"text": bedrock_response_text}
+                        {"text": "".join(text_parts)}
                     )
                 if event.get("contentBlockStart", {}).get("start", {}).get("toolUse"):
                     bedrock_tool_use = event["contentBlockStart"]["start"]["toolUse"]
@@ -285,19 +312,13 @@ class ChatCompletions:
                     )
                     global CURRENT_TOOLUSE_ID
                     CURRENT_TOOLUSE_ID = bedrock_tool_use["toolUseId"]
-                if event.get("contentBlockDelta", {}).get("delta", {}).get("toolUse"):
-                    bedrock_response_tool_input += event["contentBlockDelta"]["delta"][
-                        "toolUse"
-                    ]["input"]
-                    print(
-                        event["contentBlockDelta"]["delta"]["toolUse"]["input"],
-                        end="",
-                        flush=True,
-                    )
+                if delta.get("toolUse"):
+                    tool_input_parts.append(delta["toolUse"]["input"])
+                    print(delta["toolUse"]["input"], end="", flush=True)
                 if event.get("contentBlockStop", {}).get("contentBlockIndex") == 1:
                     bedrock_response["output"]["message"]["content"][1]["toolUse"][
                         "input"
-                    ] = json.loads(bedrock_response_tool_input)
+                    ] = json.loads("".join(tool_input_parts))
         print()
         openai_response = self._convert_bedrock_response_to_openai_format(
             bedrock_response

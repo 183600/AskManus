@@ -364,8 +364,9 @@ class DeepResearch(BaseTool):
         deadline: float,
     ) -> List[ResearchInsight]:
         """Extract insights from search results."""
-        all_insights = []
-
+        # Select the results worth analyzing first, so the same URL can never
+        # be scheduled twice and the visited set is updated exactly once.
+        pending: List[SearchResult] = []
         for rst in results:
             # Skip if URL already visited or time exceeded
             if rst.url in context.visited_urls or time.time() >= deadline:
@@ -377,13 +378,31 @@ class DeepResearch(BaseTool):
             if not rst.raw_content:
                 continue
 
-            # Extract insights using LLM
-            insights = await self._analyze_content(
-                content=rst.raw_content[:10000],  # Limit content size
-                url=rst.url,
-                title=rst.title,
-                query=original_query,
-            )
+            pending.append(rst)
+
+        if not pending:
+            return []
+
+        # Analyze every page concurrently; each analysis is an independent
+        # LLM call, so running them sequentially wastes most of the cycle.
+        analyses = await asyncio.gather(
+            *(
+                self._analyze_content(
+                    content=rst.raw_content[:10000],  # Limit content size
+                    url=rst.url,
+                    title=rst.title,
+                    query=original_query,
+                )
+                for rst in pending
+            ),
+            return_exceptions=True,
+        )
+
+        # Merge in the original result order to keep insight ordering stable.
+        all_insights: List[ResearchInsight] = []
+        for rst, insights in zip(pending, analyses):
+            if isinstance(insights, BaseException):
+                raise insights
 
             all_insights.extend(insights)
             context.insights.extend(insights)

@@ -331,16 +331,21 @@ class PlanningTool(BaseTool):
         output = f"Plan: {plan['title']} (ID: {plan['plan_id']})\n"
         output += "=" * len(output) + "\n\n"
 
-        # Calculate progress statistics
+        # Calculate progress statistics in a single pass
         total_steps = len(plan["steps"])
-        completed = sum(1 for status in plan["step_statuses"] if status == "completed")
-        in_progress = sum(
-            1 for status in plan["step_statuses"] if status == "in_progress"
-        )
-        blocked = sum(1 for status in plan["step_statuses"] if status == "blocked")
-        not_started = sum(
-            1 for status in plan["step_statuses"] if status == "not_started"
-        )
+        status_counts = {
+            "completed": 0,
+            "in_progress": 0,
+            "blocked": 0,
+            "not_started": 0,
+        }
+        for status in plan["step_statuses"]:
+            if status in status_counts:
+                status_counts[status] += 1
+        completed = status_counts["completed"]
+        in_progress = status_counts["in_progress"]
+        blocked = status_counts["blocked"]
+        not_started = status_counts["not_started"]
 
         output += f"Progress: {completed}/{total_steps} steps completed "
         if total_steps > 0:

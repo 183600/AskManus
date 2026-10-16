@@ -69,7 +69,7 @@ class ToolResult(BaseModel):
     def replace(self, **kwargs):
         """Returns a new ToolResult with the given fields replaced."""
         # return self.copy(update=kwargs)
-        return type(self)(**{**self.dict(), **kwargs})
+        return type(self)(**{**self.model_dump(), **kwargs})
 
 
 class CLIResult(ToolResult):

@@ -2,10 +2,11 @@ import asyncio
 import io
 import os
 import shlex
+import shutil
 import tarfile
 import tempfile
 import uuid
-from typing import Dict, Optional
+from typing import Dict, Optional, Set
 
 import docker
 from docker.errors import NotFound
@@ -100,6 +101,8 @@ class DockerSandbox:
         self.client = docker.from_env()
         self.container: Optional[Container] = None
         self.terminal: Optional[AsyncDockerizedTerminal] = None
+        self._host_work_dir: Optional[str] = None
+        self._created_dirs: Set[str] = set()
 
     async def create(self) -> "DockerSandbox":
         """Creates and starts the sandbox container.
@@ -175,6 +178,7 @@ class DockerSandbox:
 
         # Create and add working directory mapping
         work_dir = self._ensure_host_dir(self.config.work_dir)
+        self._host_work_dir = work_dir
         bindings[work_dir] = {"bind": self.config.work_dir, "mode": "rw"}
 
         # Add custom volume bindings
@@ -275,9 +279,11 @@ class DockerSandbox:
             resolved_path = self._safe_resolve_path(path)
             parent_dir = os.path.dirname(resolved_path)
 
-            # Create parent directory
-            if parent_dir:
+            # Create parent directory. ``mkdir -p`` is idempotent, so only the
+            # first write into a given directory needs the extra round-trip.
+            if parent_dir and parent_dir not in self._created_dirs:
                 await self.run_command(f"mkdir -p {shlex.quote(parent_dir)}")
+                self._created_dirs.add(parent_dir)
 
             # Prepare file data
             tar_stream = await self._create_tar_stream(
@@ -285,9 +291,20 @@ class DockerSandbox:
             )
 
             # Write file
-            await asyncio.to_thread(
-                self.container.put_archive, parent_dir or "/", tar_stream
-            )
+            try:
+                await asyncio.to_thread(
+                    self.container.put_archive, parent_dir or "/", tar_stream
+                )
+            except Exception:
+                # Parent may have been removed outside of this helper; recreate
+                # it once and retry so the idempotent mkdir semantics are kept.
+                if parent_dir:
+                    await self.run_command(f"mkdir -p {shlex.quote(parent_dir)}")
+                    self._created_dirs.add(parent_dir)
+                tar_stream.seek(0)
+                await asyncio.to_thread(
+                    self.container.put_archive, parent_dir or "/", tar_stream
+                )
 
         except Exception as e:
             raise RuntimeError(f"Failed to write file: {e}")
@@ -514,6 +531,17 @@ class DockerSandbox:
                     errors.append(f"Container remove error: {e}")
                 finally:
                     self.container = None
+
+            if self._host_work_dir:
+                try:
+                    await asyncio.to_thread(
+                        shutil.rmtree, self._host_work_dir, ignore_errors=True
+                    )
+                except Exception as e:
+                    errors.append(f"Host work dir cleanup error: {e}")
+                finally:
+                    self._host_work_dir = None
+                    self._created_dirs.clear()
 
         except Exception as e:
             errors.append(f"General cleanup error: {e}")
