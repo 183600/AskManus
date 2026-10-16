@@ -1,13 +1,14 @@
+import json
 from abc import ABC, abstractmethod
 from contextlib import asynccontextmanager
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from pydantic import BaseModel, Field, model_validator
 
 from app.llm import LLM
 from app.logger import logger
 from app.sandbox.client import SANDBOX_CLIENT
-from app.schema import ROLE_TYPE, AgentState, Memory, Message
+from app.schema import ROLE_TYPE, AgentState, Memory, Message, ToolCall
 
 
 class BaseAgent(BaseModel, ABC):
@@ -168,14 +169,35 @@ class BaseAgent(BaseModel, ABC):
         """Handle stuck state by adding a prompt to change strategy"""
         stuck_prompt = "\
         Observed duplicate responses. Consider new strategies and avoid repeating ineffective paths already attempted."
-        self.next_step_prompt = f"{stuck_prompt}\n{self.next_step_prompt}"
+        if not self.next_step_prompt:
+            # Avoid turning a missing prompt into the literal string "None".
+            self.next_step_prompt = stuck_prompt
+        elif stuck_prompt not in self.next_step_prompt:
+            # Keep the hint idempotent so repeated detections do not stack
+            # identical copies of the prompt on every step.
+            self.next_step_prompt = f"{stuck_prompt}\n{self.next_step_prompt}"
         logger.warning(f"Agent detected stuck state. Added prompt: {stuck_prompt}")
 
     def is_stuck(self) -> bool:
-        """Check if the agent is stuck in a loop by detecting duplicate content"""
+        """Check if the agent is stuck in a loop.
+
+        Two independent signals are used:
+
+        1. The same assistant response is produced over and over.
+        2. The same tool calls return the exact same results over and over
+           (e.g. a command that keeps failing with the same error), which
+           means the agent keeps acting without making progress.
+
+        The second signal matters most for tool-calling agents, whose
+        assistant messages usually carry no text at all.
+        """
         if len(self.memory.messages) < 2:
             return False
 
+        return self._has_duplicate_responses() or self._has_repeated_tool_cycles()
+
+    def _has_duplicate_responses(self) -> bool:
+        """Detect the same assistant content being repeated verbatim."""
         messages = self.memory.messages
         last_message = messages[-1]
         last_content = last_message.content
@@ -192,6 +214,71 @@ class BaseAgent(BaseModel, ABC):
                     return True
 
         return False
+
+    def _has_repeated_tool_cycles(self) -> bool:
+        """Detect identical tool calls that keep returning identical results.
+
+        Each "cycle" is one assistant message carrying tool calls plus the
+        tool messages that answer it. Two cycles are considered identical
+        only when both the calls (tool name + canonical arguments) and their
+        results match exactly. Tools that keep producing fresh output (for
+        example browser scrolling or time-dependent commands) therefore do
+        not trigger this signal.
+        """
+        messages = self.memory.messages
+
+        # Only inspect the sequence ending in a tool result: that is the
+        # cycle the agent just executed. Once the agent moves on to a plain
+        # assistant reply, past repetition is no longer actionable.
+        if messages[-1].role != "tool":
+            return False
+
+        fingerprints: List[Tuple[Tuple[Tuple[str, str], ...], Tuple[str, ...]]] = []
+        index = 0
+        while index < len(messages):
+            message = messages[index]
+            if message.role == "assistant" and message.tool_calls:
+                results: List[str] = []
+                index += 1
+                while index < len(messages) and messages[index].role == "tool":
+                    results.append(messages[index].content or "")
+                    index += 1
+                fingerprints.append(
+                    (
+                        tuple(
+                            self._tool_call_signature(call)
+                            for call in message.tool_calls
+                        ),
+                        tuple(results),
+                    )
+                )
+            else:
+                index += 1
+
+        if len(fingerprints) < self.duplicate_threshold:
+            return False
+
+        last_fingerprint = fingerprints[-1]
+        repeats = 0
+        for fingerprint in reversed(fingerprints):
+            if fingerprint != last_fingerprint:
+                break
+            repeats += 1
+
+        return repeats >= self.duplicate_threshold
+
+    @staticmethod
+    def _tool_call_signature(tool_call: ToolCall) -> Tuple[str, str]:
+        """Build a stable (tool name, canonical arguments) signature."""
+        raw_arguments = tool_call.function.arguments or "{}"
+        try:
+            arguments = json.dumps(
+                json.loads(raw_arguments), sort_keys=True, default=str
+            )
+        except (TypeError, ValueError):
+            # Unparseable arguments are compared as-is.
+            arguments = raw_arguments
+        return tool_call.function.name, arguments
 
     @property
     def messages(self) -> List[Message]:
