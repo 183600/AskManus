@@ -359,15 +359,19 @@ class PlanningFlow(BaseFlow):
             total = len(steps)
             progress = (completed / total) * 100 if total > 0 else 0
 
-            plan_text = f"Plan: {title} (ID: {self.active_plan_id})\n"
-            plan_text += "=" * len(plan_text) + "\n\n"
+            header = f"Plan: {title} (ID: {self.active_plan_id})\n"
+            plan_parts = [header, "=" * len(header) + "\n\n"]
 
-            plan_text += (
+            plan_parts.append(
                 f"Progress: {completed}/{total} steps completed ({progress:.1f}%)\n"
             )
-            plan_text += f"Status: {status_counts[PlanStepStatus.COMPLETED.value]} completed, {status_counts[PlanStepStatus.IN_PROGRESS.value]} in progress, "
-            plan_text += f"{status_counts[PlanStepStatus.BLOCKED.value]} blocked, {status_counts[PlanStepStatus.NOT_STARTED.value]} not started\n\n"
-            plan_text += "Steps:\n"
+            plan_parts.append(
+                f"Status: {status_counts[PlanStepStatus.COMPLETED.value]} completed, "
+                f"{status_counts[PlanStepStatus.IN_PROGRESS.value]} in progress, "
+                f"{status_counts[PlanStepStatus.BLOCKED.value]} blocked, "
+                f"{status_counts[PlanStepStatus.NOT_STARTED.value]} not started\n\n"
+            )
+            plan_parts.append("Steps:\n")
 
             status_marks = PlanStepStatus.get_status_marks()
 
@@ -379,11 +383,11 @@ class PlanningFlow(BaseFlow):
                     status, status_marks[PlanStepStatus.NOT_STARTED.value]
                 )
 
-                plan_text += f"{i}. {status_mark} {step}\n"
+                plan_parts.append(f"{i}. {status_mark} {step}\n")
                 if notes:
-                    plan_text += f"   Notes: {notes}\n"
+                    plan_parts.append(f"   Notes: {notes}\n")
 
-            return plan_text
+            return "".join(plan_parts)
         except Exception as e:
             logger.error(f"Error generating plan text from storage: {e}")
             return f"Error: Unable to retrieve plan with ID {self.active_plan_id}"

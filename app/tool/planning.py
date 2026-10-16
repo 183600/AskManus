@@ -220,7 +220,7 @@ class PlanningTool(BaseTool):
                 output="No plans available. Create a plan with the 'create' command."
             )
 
-        output = "Available plans:\n"
+        lines = ["Available plans:\n"]
         for plan_id, plan in self.plans.items():
             current_marker = " (active)" if plan_id == self._current_plan_id else ""
             completed = sum(
@@ -228,9 +228,11 @@ class PlanningTool(BaseTool):
             )
             total = len(plan["steps"])
             progress = f"{completed}/{total} steps completed"
-            output += f"• {plan_id}{current_marker}: {plan['title']} - {progress}\n"
+            lines.append(
+                f"• {plan_id}{current_marker}: {plan['title']} - {progress}\n"
+            )
 
-        return ToolResult(output=output)
+        return ToolResult(output="".join(lines))
 
     def _get_plan(self, plan_id: Optional[str]) -> ToolResult:
         """Get details of a specific plan."""
@@ -328,8 +330,8 @@ class PlanningTool(BaseTool):
 
     def _format_plan(self, plan: Dict) -> str:
         """Format a plan for display."""
-        output = f"Plan: {plan['title']} (ID: {plan['plan_id']})\n"
-        output += "=" * len(output) + "\n\n"
+        header = f"Plan: {plan['title']} (ID: {plan['plan_id']})\n"
+        parts = [header, "=" * len(header) + "\n\n"]
 
         # Calculate progress statistics
         total_steps = len(plan["steps"])
@@ -347,15 +349,19 @@ class PlanningTool(BaseTool):
         blocked = status_counts["blocked"]
         not_started = status_counts["not_started"]
 
-        output += f"Progress: {completed}/{total_steps} steps completed "
+        progress = f"Progress: {completed}/{total_steps} steps completed "
         if total_steps > 0:
             percentage = (completed / total_steps) * 100
-            output += f"({percentage:.1f}%)\n"
+            progress += f"({percentage:.1f}%)\n"
         else:
-            output += "(0%)\n"
+            progress += "(0%)\n"
+        parts.append(progress)
 
-        output += f"Status: {completed} completed, {in_progress} in progress, {blocked} blocked, {not_started} not started\n\n"
-        output += "Steps:\n"
+        parts.append(
+            f"Status: {completed} completed, {in_progress} in progress, "
+            f"{blocked} blocked, {not_started} not started\n\n"
+        )
+        parts.append("Steps:\n")
 
         # Add each step with its status and notes
         for i, (step, status, notes) in enumerate(
@@ -363,8 +369,8 @@ class PlanningTool(BaseTool):
         ):
             status_symbol = _STATUS_SYMBOLS.get(status, "[ ]")
 
-            output += f"{i}. {status_symbol} {step}\n"
+            parts.append(f"{i}. {status_symbol} {step}\n")
             if notes:
-                output += f"   Notes: {notes}\n"
+                parts.append(f"   Notes: {notes}\n")
 
-        return output
+        return "".join(parts)

@@ -323,7 +323,8 @@ class StrReplaceEditor(BaseTool):
         self._file_history[path].append(file_content)
 
         # Create a snippet of the edited section
-        replacement_line = file_content.split(old_str)[0].count("\n")
+        replacement_index = file_content.find(old_str)
+        replacement_line = file_content.count("\n", 0, replacement_index)
         start_line = max(0, replacement_line - SNIPPET_LINES)
         end_line = replacement_line + SNIPPET_LINES + new_str.count("\n")
         snippet = "\n".join(new_file_content.split("\n")[start_line : end_line + 1])
